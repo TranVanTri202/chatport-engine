@@ -67,10 +67,11 @@ export class BotService {
 
   create(dto: CreateBotDto): Promise<Bot> {
     const { settings, ...rest } = dto;
-    return this.repo.create({
+    const data = {
       ...(rest as Prisma.BotUncheckedCreateInput),
       ...this.mapSettings(settings),
-    });
+    } as Prisma.BotUncheckedCreateInput;
+    return this.repo.create(data);
   }
 
   async update(id: number, dto: UpdateBotDto): Promise<Bot> {
