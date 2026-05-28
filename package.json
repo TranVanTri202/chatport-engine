@@ -1,5 +1,5 @@
 {
-  "name": "workgpt-zalo",
+  "name": "askbase-backend",
   "version": "0.1.0",
   "description": "Multi-channel bot backend (Zalo, Telegram) with RAG (pgvector) + NestJS",
   "private": true,

@@ -3,26 +3,26 @@ version: "3.9"
 services:
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: workgpt-postgres
+    container_name: askbase-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: workgpt
-      POSTGRES_PASSWORD: workgpt
-      POSTGRES_DB: workgpt
+      POSTGRES_USER: askbase
+      POSTGRES_PASSWORD: askbase
+      POSTGRES_DB: askbase
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./prisma/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U workgpt -d workgpt"]
+      test: ["CMD-SHELL", "pg_isready -U askbase -d askbase"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   redis:
     image: redis:7-alpine
-    container_name: workgpt-redis
+    container_name: askbase-redis
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     ports:
@@ -39,7 +39,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    container_name: workgpt-app
+    container_name: askbase-app
     restart: unless-stopped
     depends_on:
       postgres:
@@ -48,7 +48,7 @@ services:
         condition: service_healthy
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://workgpt:workgpt@postgres:5432/workgpt?schema=public
+      DATABASE_URL: postgresql://askbase:askbase@postgres:5432/askbase?schema=public
       REDIS_URL: redis://redis:6379
     ports:
       - "3000:3000"

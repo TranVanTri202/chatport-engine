@@ -11,7 +11,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
  */
 export function setupSwagger(app: INestApplication): void {
   const config = new DocumentBuilder()
-    .setTitle('WorkGPT Zalo API')
+    .setTitle('AseBase Zalo API')
     .setDescription(
       'Multi-channel bot backend. Channel-agnostic core + Zalo adapter + RAG over pgvector.',
     )

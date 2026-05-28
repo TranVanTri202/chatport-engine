@@ -39,8 +39,9 @@ export class RealtimeGateway
   afterInit(): void {
     // CORS for namespace handled via gateway options above; if more granular
     // origin control is needed, configure `server.engine.opts.cors` here.
-    if (this.server) {
-      this.server.engine.opts.cors = {
+    const engine = this.server?.engine as { opts?: { cors?: { origin?: string; credentials?: boolean } } } | undefined;
+    if (engine?.opts) {
+      engine.opts.cors = {
         origin: this.config.socketCorsOrigin,
         credentials: true,
       };
