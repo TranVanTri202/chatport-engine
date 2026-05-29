@@ -1,4 +1,5 @@
-import { Controller, Param, Post } from '@nestjs/common';
+import { Controller, Get, Param, Post } from '@nestjs/common';
+import { promises as fs } from 'node:fs';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentCustomer } from '@/shared/decorators/current-customer.decorator';
 import { ZaloAdapter } from './zalo.adapter';
@@ -16,6 +17,19 @@ export class ZaloController {
   @Post('login')
   async startLogin(@CurrentCustomer() customerId: number) {
     return this.adapter.startLogin({ customerId });
+  }
+
+  @Get('qr')
+  async getQrBase64() {
+    const buffer = await fs.readFile('qr.png');
+    return {
+      qrBase64: `data:image/png;base64,${buffer.toString('base64')}`,
+    };
+  }
+
+  @Get('status/:botId')
+  async status(@Param('botId') botId: string) {
+    return { status: await this.adapter.status(botId) };
   }
 
   @Post('logout/:botId')
