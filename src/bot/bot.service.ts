@@ -62,9 +62,10 @@ export class BotService {
   }
 
   create(dto: CreateBotDto): Promise<Bot> {
-    const { settings, ...rest } = dto;
+    const { settings, temperature, ...rest } = dto;
     const data = {
       ...(rest as Prisma.BotUncheckedCreateInput),
+      temperature: temperature ?? 0.5,
       ...this.mapSettings(settings),
     } as Prisma.BotUncheckedCreateInput;
     return this.repo.create(data);
@@ -72,8 +73,12 @@ export class BotService {
 
   async update(id: number, dto: UpdateBotDto): Promise<Bot> {
     await this.get(id);
-    const { settings, ...rest } = dto;
-    return this.repo.update(id, { ...rest, ...this.mapSettings(settings) });
+    const { settings, temperature, ...rest } = dto;
+    return this.repo.update(id, {
+      ...rest,
+      ...(temperature !== undefined ? { temperature } : {}),
+      ...this.mapSettings(settings),
+    });
   }
 
   async delete(id: number): Promise<void> {

@@ -43,6 +43,19 @@ export class BotController {
     return this.bots.update(id, body);
   }
 
+  @Get(':id/temperature')
+  getTemperature(@Param('id', ParseIntPipe) id: number) {
+    return this.bots.getDetailed(id).then(({ bot }) => ({ temperature: bot.temperature ?? 0.5 }));
+  }
+
+  @Patch(':id/temperature')
+  updateTemperature(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { temperature: number },
+  ) {
+    return this.bots.update(id, { temperature: body.temperature });
+  }
+
   @Delete(':id')
   async remove(@Param('id', ParseIntPipe) id: number) {
     await this.bots.delete(id);
