@@ -21,16 +21,24 @@ export class ZaloListeners {
     private readonly instances: ZaloInstanceRegistry,
   ) {}
 
-  /**
-   * Attach the 7 documented events to a zca-js API instance for a given bot.
-   * Concrete subscription wiring is filled in once `zca-js` is installed.
-   */
-  attach(_api: unknown, bot: { id: number; externalId: string }): void {
-    // TODO: api.listener.on('message', …); on('reaction'); on('friend_event');
-    // on('undo'); on('group_event'); on('closed'); on('error');
-    this.logger.warn(
-      `ZaloListeners.attach for bot=${bot.id} (uid=${bot.externalId}) not implemented yet`,
-    );
+  attach(api: unknown, bot: { id: number; externalId: string }): void {
+    const client = api as {
+      listener?: {
+        start?: () => void;
+        on?: (event: string, handler: (...args: unknown[]) => void) => void;
+      };
+    };
+
+    client.listener?.start?.();
+    client.listener?.on?.('message', async (message: unknown) => {
+      const raw = message as ZaloRawMessage;
+      await this.dispatchMessage(bot.externalId, raw);
+    });
+    client.listener?.on?.('closed', async (code: unknown) => {
+      if (code === 3003) await this.handleClosed3003(bot.externalId);
+    });
+
+    this.logger.log(`Attached Zalo listeners for bot=${bot.id} uid=${bot.externalId}`);
   }
 
   /** Called from `attach` once an inbound `message` event is normalized. */
@@ -45,7 +53,6 @@ export class ZaloListeners {
   /** Called from `attach` when zca-js emits `closed` with code 3003. */
   protected async handleClosed3003(botExternalId: string): Promise<void> {
     this.instances.delete(botExternalId);
-    // BotResponseService listens to bot:expired socket events to surface UI.
     this.logger.warn(`Zalo cookie expired for uid=${botExternalId}`);
   }
 }

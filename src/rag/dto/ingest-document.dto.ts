@@ -1,8 +1,8 @@
 import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class IngestDocumentDto {
-  /** Server-injected from JWT — not validated as input. */
-  customerId!: number;
+  /** Server-injected from route or bot context — not validated as input. */
+  botId!: number;
 
   @IsString()
   @MaxLength(200)

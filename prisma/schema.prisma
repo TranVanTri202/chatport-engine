@@ -40,8 +40,6 @@ model Customer {
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   bots      Bot[]
-  documents Document[]
-  prompts   Prompt[]
 }
 
 model Bot {
@@ -52,7 +50,7 @@ model Bot {
   name          String?
   avatar        String?
   status        BotStatus      @default(inactive)
-  promptId      Int?
+  systemPrompt  String?        @db.Text
 
   // === Per-bot LLM / RAG settings. All optional — null = fall back to env. ===
   llmModel         String?
@@ -74,9 +72,8 @@ model Bot {
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   customer      Customer       @relation(fields: [customerId], references: [id])
-  prompt        Prompt?        @relation(fields: [promptId], references: [id])
   session       BotSession?
-  documents     BotDocument[]
+  documents     Document[]
   conversations Conversation[]
 
   @@unique([channel, externalId])
@@ -141,7 +138,7 @@ model Message {
 
 model Document {
   id         Int             @id @default(autoincrement())
-  customerId Int
+  botId      Int
   title      String
   source     String?
   mimeType   String?
@@ -150,11 +147,10 @@ model Document {
   metadata   Json            @default("{}")
   createdAt  DateTime        @default(now())
   updatedAt  DateTime        @updatedAt
-  customer   Customer        @relation(fields: [customerId], references: [id])
+  bot        Bot             @relation(fields: [botId], references: [id], onDelete: Cascade)
   chunks     DocumentChunk[]
-  bots       BotDocument[]
 
-  @@index([customerId])
+  @@index([botId])
 }
 
 model DocumentChunk {
@@ -169,25 +165,3 @@ model DocumentChunk {
   @@index([documentId, ordinal])
 }
 
-model BotDocument {
-  botId      Int
-  documentId Int
-  bot        Bot      @relation(fields: [botId], references: [id], onDelete: Cascade)
-  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
-
-  @@id([botId, documentId])
-}
-
-model Prompt {
-  id         Int      @id @default(autoincrement())
-  customerId Int
-  name       String
-  template   String   @db.Text
-  variables  Json     @default("[]")
-  version    Int      @default(1)
-  isActive   Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  customer   Customer @relation(fields: [customerId], references: [id])
-  bots       Bot[]
-}

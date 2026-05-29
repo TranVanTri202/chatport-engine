@@ -11,11 +11,7 @@ import {
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentCustomer } from '@/shared/decorators/current-customer.decorator';
 import { BotService } from './bot.service';
-import {
-  AttachDocumentsDto,
-  CreateBotDto,
-  UpdateBotDto,
-} from './dto/create-bot.dto';
+import { CreateBotDto, UpdateBotDto } from './dto/create-bot.dto';
 
 @ApiTags('bots')
 @ApiBearerAuth('jwt')
@@ -53,28 +49,16 @@ export class BotController {
     return { ok: true };
   }
 
-  // ── Document attachments ───────────────────────────────────────────
-
-  @Get(':id/documents')
-  listDocuments(@Param('id', ParseIntPipe) id: number) {
-    return this.bots.listAttachedDocuments(id);
+  @Get(':id/system-prompt')
+  getSystemPrompt(@Param('id', ParseIntPipe) id: number) {
+    return this.bots.getSystemPrompt(id);
   }
 
-  @Post(':id/documents')
-  async attachDocuments(
+  @Patch(':id/system-prompt')
+  updateSystemPrompt(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: AttachDocumentsDto,
+    @Body() body: { systemPrompt: string },
   ) {
-    await this.bots.attachDocuments(id, body);
-    return { ok: true };
-  }
-
-  @Delete(':id/documents/:docId')
-  async detachDocument(
-    @Param('id', ParseIntPipe) id: number,
-    @Param('docId', ParseIntPipe) docId: number,
-  ) {
-    await this.bots.detachDocument(id, docId);
-    return { ok: true };
+    return this.bots.updateSystemPrompt(id, body.systemPrompt);
   }
 }

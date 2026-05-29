@@ -19,13 +19,13 @@ export class DocumentService {
     @InjectQueue(RAG_EMBED_QUEUE) private readonly queue: Queue<EmbedDocumentJob>,
   ) {}
 
-  list(customerId: number): Promise<Document[]> {
-    return this.repo.findManyByCustomer(customerId);
+  list(botId: number): Promise<Document[]> {
+    return this.repo.findManyByBot(botId);
   }
 
   async ingest(dto: IngestDocumentDto): Promise<Document> {
     return this.create({
-      customerId: dto.customerId,
+      botId: dto.botId,
       title: dto.title,
       source: dto.source,
       mimeType: dto.mimeType,
@@ -34,7 +34,7 @@ export class DocumentService {
   }
 
   async ingestFromFile(input: {
-    customerId: number;
+    botId: number;
     overrideTitle?: string;
     file: { originalname: string; mimetype: string; buffer: Buffer };
   }): Promise<Document> {
@@ -44,7 +44,7 @@ export class DocumentService {
       buffer: input.file.buffer,
     });
     return this.create({
-      customerId: input.customerId,
+      botId: input.botId,
       title: input.overrideTitle ?? loaded.title,
       source: loaded.source,
       mimeType: loaded.mimeType,
@@ -53,13 +53,13 @@ export class DocumentService {
   }
 
   async ingestFromUrl(input: {
-    customerId: number;
+    botId: number;
     url: string;
     overrideTitle?: string;
   }): Promise<Document> {
     const loaded = await this.loader.loadUrl(input.url);
     return this.create({
-      customerId: input.customerId,
+      botId: input.botId,
       title: input.overrideTitle ?? loaded.title,
       source: loaded.source,
       mimeType: loaded.mimeType,
@@ -77,14 +77,14 @@ export class DocumentService {
   }
 
   private async create(input: {
-    customerId: number;
+    botId: number;
     title: string;
     source?: string;
     mimeType?: string;
     rawText: string;
   }): Promise<Document> {
     const doc = await this.repo.create({
-      customerId: input.customerId,
+      botId: input.botId,
       title: input.title,
       source: input.source,
       mimeType: input.mimeType,

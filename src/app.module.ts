@@ -15,7 +15,6 @@ import { GlobalExceptionFilter } from '@/shared/filters/global-exception.filter'
 import { LoggingInterceptor } from '@/shared/interceptors/logging.interceptor';
 
 import { LlmModule } from '@/llm/llm.module';
-import { PromptsModule } from '@/prompts/prompts.module';
 import { RagModule } from '@/rag/rag.module';
 import { ConversationsModule } from '@/conversations/conversations.module';
 import { MessagingModule } from '@/messaging/messaging.module';
@@ -57,7 +56,6 @@ import { QuotaModule } from '@/quota/quota.module';
 
     // ── Domain (per plan §15 bootstrap order) ───────────────────────
     LlmModule,
-    PromptsModule,
     RagModule,
     ConversationsModule,
     QuotaModule,

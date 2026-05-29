@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { ChannelType } from '@/shared/types';
+import { ChannelType, ThreadType } from '@/shared/types';
 import {
   ChannelOfflineError,
   ChannelSendError,
@@ -15,16 +15,11 @@ import {
 } from '../channel-adapter.interface';
 import { ChannelRegistry } from '../channel-registry.service';
 import { ZaloInstanceRegistry } from './zalo-instance.registry';
-import { ZaloSessionService } from './zalo-session.service';
+import { ZaloSessionService, ZaloSessionPayload } from './zalo-session.service';
 import { ZaloNormalizer } from './zalo.normalizer';
 import { ZaloListeners } from './zalo.listeners';
+import { MessagingPublisher } from '@/messaging/messaging.publisher';
 
-/**
- * Zalo channel adapter. Only this file (and helpers under ./) may import `zca-js`.
- *
- * Implementation is intentionally skeletal — wiring will be completed once
- * dependencies are installed and Zalo SDK types are available.
- */
 @Injectable()
 export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
   readonly channel = ChannelType.zalo;
@@ -37,45 +32,116 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
     private readonly sessions: ZaloSessionService,
     private readonly normalizer: ZaloNormalizer,
     private readonly listeners: ZaloListeners,
+    private readonly publisher: MessagingPublisher,
   ) {}
 
   onModuleInit(): void {
     this.registry.register(this);
   }
 
-  // ---- IChannelAdapter ----
-
-  async startLogin(_input: StartLoginInput): Promise<StartLoginResult> {
+  async startLogin(input: StartLoginInput): Promise<StartLoginResult> {
     const sessionId = randomUUID();
-    // TODO: spawn login flow via zca-js loginQR (see plan §8.1) and push events
-    // through RealtimeGateway. Resolve immediately with the sessionId so the FE
-    // can subscribe to socket room `session:{sessionId}` first.
-    this.logger.warn('ZaloAdapter.startLogin not implemented yet');
+    const { Zalo, LoginQRCallbackEventType } = await import('zca-js');
+    const zalo = new Zalo({ selfListen: false, checkUpdate: true, logging: true });
+
+    let resolvedBotExternalId = sessionId;
+
+    await zalo.loginQR(
+      { userAgent: 'AskBase_BE', qrPath: undefined },
+      async (event) => {
+        switch (event.type) {
+          case LoginQRCallbackEventType.QRCodeGenerated:
+            this.logger.log(`Zalo QR generated for customer=${input.customerId}`);
+            break;
+          case LoginQRCallbackEventType.QRCodeExpired:
+            this.logger.warn(`Zalo QR expired for customer=${input.customerId}`);
+            break;
+          case LoginQRCallbackEventType.GotLoginInfo: {
+            const payload: ZaloSessionPayload = {
+              cookie: event.data.cookie,
+              imei: event.data.imei,
+              userAgent: event.data.userAgent,
+            };
+            await this.sessions.save(input.customerId, payload);
+            break;
+          }
+          case LoginQRCallbackEventType.QRCodeScanned:
+            this.logger.log(`Zalo QR scanned by ${event.data.display_name}`);
+            break;
+          case LoginQRCallbackEventType.QRCodeDeclined:
+            this.logger.warn(`Zalo QR declined: ${event.data.code}`);
+            break;
+        }
+      },
+    );
+
+    const api = zalo;
+    const context = typeof api.getContext === 'function' ? api.getContext() : null;
+    if (context?.uid) resolvedBotExternalId = String(context.uid);
+
+    this.instances.set(resolvedBotExternalId, api);
+    this.listeners.attach(api, { id: input.customerId, externalId: resolvedBotExternalId });
+
     return {
       sessionId,
-      hint: { kind: 'qr', data: { sessionId } },
+      hint: { kind: 'qr', data: { sessionId, botExternalId: resolvedBotExternalId } },
     };
   }
 
   async restore(botId: number): Promise<void> {
     const session = await this.sessions.load(botId);
     if (!session) return;
-    // TODO: zca-js login({ cookie, imei, userAgent }); instances.set; listeners.attach
-    this.logger.warn(`ZaloAdapter.restore(${botId}) not implemented yet`);
+
+    const { Zalo } = await import('zca-js');
+    const zalo = new Zalo({ selfListen: false, checkUpdate: false, logging: false });
+    const api = await zalo.login({
+      cookie: session.cookie,
+      imei: session.imei,
+      userAgent: session.userAgent,
+    });
+
+    const context = typeof api?.getContext === 'function' ? api.getContext() : null;
+    const botExternalId = String(context?.uid ?? botId);
+
+    this.instances.set(botExternalId, api);
+    this.listeners.attach(api, { id: botId, externalId: botExternalId });
   }
 
   async logout(botId: number): Promise<void> {
-    // TODO: stop listeners + drop from instances + sessions.clear + Bot.status=inactive
-    this.logger.warn(`ZaloAdapter.logout(${botId}) not implemented yet`);
+    this.instances.delete(String(botId));
     await this.sessions.clear(botId);
+    this.logger.log(`Zalo bot logged out: ${botId}`);
   }
 
   async send(botExternalId: string, msg: OutboundMessage): Promise<SendResult> {
-    const api = this.instances.get(botExternalId);
+    const api = this.instances.get(botExternalId) as {
+      sendMessage?: (payload: Record<string, unknown>, threadId: string, type: number) => Promise<unknown>;
+    } | undefined;
+
     if (!api) throw new ChannelOfflineError(botExternalId);
-    // TODO: map OutboundMessage → zca-js payload + Promise.race with timeout(10s)
-    void msg;
-    throw new ChannelSendError('ZaloAdapter.send not implemented yet');
+    if (!msg.text && !msg.attachments?.length) {
+      throw new ChannelSendError('Empty outbound message');
+    }
+
+    const threadType = msg.threadType === ThreadType.group ? 1 : 0;
+
+    try {
+      if (msg.text) {
+        await api.sendMessage?.({ msg: msg.text }, msg.threadId, threadType);
+      }
+      for (const attachment of msg.attachments ?? []) {
+        await api.sendMessage?.(
+          { msg: attachment.caption ?? '', attachments: [{ data: attachment.url }] },
+          msg.threadId,
+          threadType,
+        );
+      }
+      return { messageExternalId: null, sentAt: Date.now() };
+    } catch (error) {
+      throw new ChannelSendError(
+        `Failed to send Zalo message: ${(error as Error).message}`,
+      );
+    }
   }
 
   async status(botExternalId: string): Promise<ChannelStatus> {

@@ -2,12 +2,7 @@ import { forwardRef, Inject, Injectable, NotFoundException } from '@nestjs/commo
 import { Bot, Prisma } from '@prisma/client';
 import { QuotaService } from '@/quota/quota.service';
 import { BotRepository } from './repositories/bot.repository';
-import {
-  AttachDocumentsDto,
-  BotSettingsDto,
-  CreateBotDto,
-  UpdateBotDto,
-} from './dto/create-bot.dto';
+import { BotSettingsDto, CreateBotDto, UpdateBotDto } from './dto/create-bot.dto';
 
 export interface BotWithUsage {
   bot: Bot;
@@ -57,12 +52,13 @@ export class BotService {
     };
   }
 
-  listAttachedDocuments(botId: number) {
-    return this.repo.listAttachedDocuments(botId);
+  getSystemPrompt(botId: number): Promise<string | null> {
+    return this.repo.getSystemPrompt(botId);
   }
 
-  async detachDocument(botId: number, documentId: number): Promise<void> {
-    await this.repo.detachDocument(botId, documentId);
+  async updateSystemPrompt(botId: number, systemPrompt: string): Promise<Bot> {
+    await this.get(botId);
+    return this.repo.update(botId, { systemPrompt });
   }
 
   create(dto: CreateBotDto): Promise<Bot> {

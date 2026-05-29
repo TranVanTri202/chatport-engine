@@ -18,7 +18,6 @@ import {
   ApiConsumes,
   ApiTags,
 } from '@nestjs/swagger';
-import { CurrentCustomer } from '@/shared/decorators/current-customer.decorator';
 import { DocumentService } from './document.service';
 import { IngestDocumentDto } from './dto/ingest-document.dto';
 import { ImportUrlDto, UploadDocumentMetaDto } from './dto/import-url.dto';
@@ -27,21 +26,21 @@ const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
 @ApiTags('documents')
 @ApiBearerAuth('jwt')
-@Controller('documents')
+@Controller('bots/:botId/documents')
 export class DocumentsController {
   constructor(private readonly documents: DocumentService) {}
 
   @Get()
-  list(@CurrentCustomer() customerId: number) {
-    return this.documents.list(customerId);
+  list(@Param('botId', ParseIntPipe) botId: number) {
+    return this.documents.list(botId);
   }
 
   @Post()
   ingest(
-    @CurrentCustomer() customerId: number,
-    @Body() body: Omit<IngestDocumentDto, 'customerId'>,
+    @Param('botId', ParseIntPipe) botId: number,
+    @Body() body: Omit<IngestDocumentDto, 'botId'>,
   ) {
-    return this.documents.ingest({ ...body, customerId } as IngestDocumentDto);
+    return this.documents.ingest({ ...body, botId } as IngestDocumentDto);
   }
 
   @Post('upload')
@@ -60,8 +59,8 @@ export class DocumentsController {
     FileInterceptor('file', { limits: { fileSize: MAX_UPLOAD_BYTES } }),
   )
   upload(
-    @CurrentCustomer() customerId: number,
-    @Body() body: Omit<UploadDocumentMetaDto, 'customerId'>,
+    @Param('botId', ParseIntPipe) botId: number,
+    @Body() body: Omit<UploadDocumentMetaDto, 'botId'>,
     @UploadedFile(
       new ParseFilePipeBuilder()
         .addMaxSizeValidator({ maxSize: MAX_UPLOAD_BYTES })
@@ -71,7 +70,7 @@ export class DocumentsController {
   ) {
     if (!file) throw new BadRequestException('file is required');
     return this.documents.ingestFromFile({
-      customerId,
+      botId,
       overrideTitle: body.title,
       file: {
         originalname: file.originalname,
@@ -83,11 +82,11 @@ export class DocumentsController {
 
   @Post('import-url')
   importUrl(
-    @CurrentCustomer() customerId: number,
-    @Body() body: Omit<ImportUrlDto, 'customerId'>,
+    @Param('botId', ParseIntPipe) botId: number,
+    @Body() body: Omit<ImportUrlDto, 'botId'>,
   ) {
     return this.documents.ingestFromUrl({
-      customerId,
+      botId,
       url: body.url,
       overrideTitle: body.title,
     });

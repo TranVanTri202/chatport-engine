@@ -1,8 +1,8 @@
 import { IsOptional, IsString, IsUrl, MaxLength } from 'class-validator';
 
 export class ImportUrlDto {
-  /** Server-injected from JWT — not validated as input. */
-  customerId!: number;
+  /** Server-injected from route or bot context — not validated as input. */
+  botId!: number;
 
   @IsUrl({ protocols: ['http', 'https'], require_protocol: true })
   url!: string;
@@ -14,8 +14,8 @@ export class ImportUrlDto {
 }
 
 export class UploadDocumentMetaDto {
-  /** Server-injected from JWT — not validated as input. */
-  customerId!: number;
+  /** Server-injected from route or bot context — not validated as input. */
+  botId!: number;
 
   @IsOptional()
   @IsString()

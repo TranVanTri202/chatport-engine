@@ -1,6 +1,5 @@
 import { Type } from 'class-transformer';
 import {
-  IsArray,
   IsEnum,
   IsInt,
   IsObject,
@@ -80,9 +79,9 @@ export class CreateBotDto {
   name?: string;
 
   @IsOptional()
-  @IsInt()
-  @IsPositive()
-  promptId?: number;
+  @IsString()
+  @MaxLength(20000)
+  systemPrompt?: string;
 
   @IsOptional()
   @ValidateNested()
@@ -97,18 +96,12 @@ export class UpdateBotDto {
   name?: string;
 
   @IsOptional()
-  @IsInt()
-  @IsPositive()
-  promptId?: number;
+  @IsString()
+  @MaxLength(20000)
+  systemPrompt?: string;
 
   @IsOptional()
   @ValidateNested()
   @Type(() => BotSettingsDto)
   settings?: BotSettingsDto;
-}
-
-export class AttachDocumentsDto {
-  @IsArray()
-  @IsInt({ each: true })
-  documentIds!: number[];
 }

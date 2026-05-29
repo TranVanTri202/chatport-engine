@@ -60,38 +60,32 @@ export class BotRepository {
     return this.prisma.bot.delete({ where: { id } });
   }
 
-  countAttachedDocuments(botId: number): Promise<number> {
-    return this.prisma.botDocument.count({ where: { botId } });
+  getSystemPrompt(botId: number): Promise<string | null> {
+    return this.prisma.bot.findUnique({
+      where: { id: botId },
+      select: { systemPrompt: true },
+    }).then((bot) => bot?.systemPrompt ?? null);
   }
 
-  listAttachedDocuments(botId: number) {
-    return this.prisma.botDocument.findMany({
+  listDocuments(botId: number) {
+    return this.prisma.document.findMany({
       where: { botId },
-      include: { document: true },
-      orderBy: { documentId: 'asc' },
+      orderBy: { id: 'desc' },
     });
   }
 
   detachDocument(botId: number, documentId: number) {
-    return this.prisma.botDocument.delete({
-      where: { botId_documentId: { botId, documentId } },
+    return this.prisma.document.update({
+      where: { id: documentId },
+      data: { botId },
     });
   }
 
-  /**
-   * Idempotent attach. Caller is responsible for the quota check (use
-   * `attachDocumentsWithQuota` in a transaction).
-   */
   attachDocuments(botId: number, documentIds: number[]) {
-    return this.prisma.$transaction(
-      documentIds.map((documentId) =>
-        this.prisma.botDocument.upsert({
-          where: { botId_documentId: { botId, documentId } },
-          create: { botId, documentId },
-          update: {},
-        }),
-      ),
-    );
+    return this.prisma.document.updateMany({
+      where: { id: { in: documentIds } },
+      data: { botId },
+    });
   }
 
   /**

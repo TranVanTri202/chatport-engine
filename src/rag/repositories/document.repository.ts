@@ -6,9 +6,9 @@ import { PrismaService } from '@/shared/prisma/prisma.service';
 export class DocumentRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  findManyByCustomer(customerId: number): Promise<Document[]> {
+  findManyByBot(botId: number): Promise<Document[]> {
     return this.prisma.document.findMany({
-      where: { customerId },
+      where: { botId },
       orderBy: { id: 'desc' },
     });
   }
