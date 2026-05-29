@@ -84,6 +84,11 @@ export class CreateBotDto {
   systemPrompt?: string;
 
   @IsOptional()
+  @Min(0)
+  @Max(2)
+  temperature?: number;
+
+  @IsOptional()
   @ValidateNested()
   @Type(() => BotSettingsDto)
   settings?: BotSettingsDto;
@@ -99,6 +104,11 @@ export class UpdateBotDto {
   @IsString()
   @MaxLength(20000)
   systemPrompt?: string;
+
+  @IsOptional()
+  @Min(0)
+  @Max(2)
+  temperature?: number;
 
   @IsOptional()
   @ValidateNested()

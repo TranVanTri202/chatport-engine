@@ -54,7 +54,7 @@ model Bot {
 
   // === Per-bot LLM / RAG settings. All optional — null = fall back to env. ===
   llmModel         String?
-  temperature      Float?
+  temperature      Float?         @default(0.5)
   maxTokens        Int?
   topP             Float?
   frequencyPenalty Float?
