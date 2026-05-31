@@ -26,6 +26,22 @@ export class AppConfig {
     return this.cs.getOrThrow<string>('OPENAI_API_KEY');
   }
 
+  get firebaseProjectId(): string {
+    return this.cs.getOrThrow<string>('FIREBASE_PROJECT_ID');
+  }
+
+  get firebaseServiceAccountJson(): string | undefined {
+    return this.cs.get<string>('FIREBASE_SERVICE_ACCOUNT_JSON');
+  }
+
+  get firebaseClientEmail(): string | undefined {
+    return this.cs.get<string>('FIREBASE_CLIENT_EMAIL');
+  }
+
+  get firebasePrivateKey(): string | undefined {
+    return this.cs.get<string>('FIREBASE_PRIVATE_KEY');
+  }
+
   /** Default per-call LLM settings — Bot rows override these field-by-field. */
   get llmDefaults(): LlmCallSettings {
     return {
@@ -40,6 +56,22 @@ export class AppConfig {
 
   get ragTopKDefault(): number {
     return Number(this.cs.getOrThrow<number>('RAG_TOP_K'));
+  }
+
+  get conversationHistoryLimit(): number {
+    return Number(this.cs.get<string>('CONVERSATION_HISTORY_LIMIT') ?? 40);
+  }
+
+  get conversationRecentLimit(): number {
+    return Number(this.cs.get<string>('CONVERSATION_RECENT_LIMIT') ?? 15);
+  }
+
+  get conversationSummaryTriggerLimit(): number {
+    return Number(this.cs.get<string>('CONVERSATION_SUMMARY_TRIGGER_LIMIT') ?? 10);
+  }
+
+  get conversationSummaryMaxChars(): number {
+    return Number(this.cs.get<string>('CONVERSATION_SUMMARY_MAX_CHARS') ?? 1200);
   }
 
   get embeddingModel(): string {

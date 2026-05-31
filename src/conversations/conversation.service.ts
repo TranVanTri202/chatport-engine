@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Bot, Conversation } from '@prisma/client';
+import { Bot, Conversation, Prisma } from '@prisma/client';
 import { PrismaService } from '@/shared/prisma/prisma.service';
 import { ChannelType, ThreadType } from '@/shared/types';
 import { InboundMessageDto } from '@/messaging/dto/inbound-message.dto';
@@ -123,6 +123,45 @@ export class ConversationService {
     });
     if (!c) throw new NotFoundException(`Conversation ${id} not found`);
     return c;
+  }
+
+  async getSummary(id: number): Promise<string | null> {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id },
+      select: { metadata: true },
+    });
+    if (!conversation) throw new NotFoundException(`Conversation ${id} not found`);
+
+    const metadata = conversation.metadata as Prisma.JsonObject | Prisma.JsonArray | null;
+    if (!metadata || Array.isArray(metadata)) return null;
+
+    const summary = metadata.summary;
+    return typeof summary === 'string' && summary.trim().length > 0 ? summary.trim() : null;
+  }
+
+  async setSummary(id: number, summary: string): Promise<void> {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id },
+      select: { metadata: true },
+    });
+    if (!conversation) throw new NotFoundException(`Conversation ${id} not found`);
+
+    const metadata = conversation.metadata as Prisma.JsonObject | Prisma.JsonArray | null;
+    const nextMetadata = Array.isArray(metadata) ? {} : { ...(metadata ?? {}) };
+    nextMetadata.summary = summary;
+
+    await this.prisma.conversation.update({
+      where: { id },
+      data: { metadata: nextMetadata },
+    });
+  }
+
+  async getContextSnapshot(id: number): Promise<{ summary: string | null }> {
+    return { summary: await this.getSummary(id) };
+  }
+
+  async updateContextSnapshot(id: number, summary: string): Promise<void> {
+    await this.setSummary(id, summary);
   }
 
   async markRead(id: number): Promise<void> {

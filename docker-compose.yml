@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:pg16-alpine
     container_name: askbase-postgres
     restart: unless-stopped
     environment:
@@ -38,7 +38,7 @@ services:
   app:
     build:
       context: .
-      dockerfile: Dockerfile.dev
+      dockerfile: Dockerfile
     container_name: askbase-app
     restart: unless-stopped
     depends_on:
@@ -52,9 +52,6 @@ services:
       REDIS_URL: redis://redis:6379
     ports:
       - "3000:3000"
-    volumes:
-      - .:/app
-      - /app/node_modules
 
 volumes:
   pgdata:
