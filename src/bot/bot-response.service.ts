@@ -11,6 +11,7 @@ import { QuotaExceededError } from '@/shared/errors/quota.errors';
 import { MessagingPublisher } from '@/messaging/messaging.publisher';
 import { ReplyPolicyService } from '@/messaging/reply-policy.service';
 import { MessageService } from '@/conversations/message.service';
+import { ConversationService } from '@/conversations/conversation.service';
 import { PromptService } from '@/prompts/prompt.service';
 import { PromptRendererService } from '@/prompts/prompt-renderer.service';
 import { RetrievalService } from '@/rag/retrieval.service';
@@ -34,6 +35,7 @@ export class BotResponseService {
   constructor(
     private readonly publisher: MessagingPublisher,
     private readonly messages: MessageService,
+    private readonly conversations: ConversationService,
     private readonly prompts: PromptService,
     private readonly renderer: PromptRendererService,
     private readonly retrieval: RetrievalService,
@@ -72,13 +74,39 @@ export class BotResponseService {
     const userText = inbound.text!.trim();
     const topK = bot.ragTopK ?? this.config.ragTopKDefault;
     const contexts = await this.retrieval.search(bot.id, userText, topK);
-    const system = this.renderer.render(prompt.template, {
-      bot_name: bot.name ?? '',
-      rag_context: contexts.map((c) => c.content).join('\n---\n'),
-      user_message: userText,
+
+    const historyLimit = this.config.conversationHistoryLimit;
+    const recentLimit = this.config.conversationRecentLimit;
+    const summaryTriggerLimit = this.config.conversationSummaryTriggerLimit;
+    const summaryMaxChars = this.config.conversationSummaryMaxChars;
+
+    const history = await this.messages.lastN(conversation.id, historyLimit);
+    const recentMessages = history.slice(-recentLimit);
+    const olderMessages = history.slice(0, Math.max(0, history.length - recentMessages.length));
+    const recentHistory = this.formatRecentHistory(recentMessages);
+
+    let summary = await this.conversationSummary(conversation.id);
+    if (olderMessages.length >= summaryTriggerLimit) {
+      summary = await this.updateRollingSummary({
+        botName: bot.name ?? '',
+        conversationId: conversation.id,
+        currentSummary: summary,
+        olderMessages,
+        recentMessages,
+        maxChars: summaryMaxChars,
+      });
+    }
+
+    const conversationState = this.buildConversationState({
+      botName: bot.name ?? '',
+      userText,
+      ragContext: contexts.map((c) => c.content).join('\n---\n'),
+      recentHistory,
+      summary,
     });
 
-    const history = await this.messages.lastN(conversation.id, 10);
+    const system = this.renderer.render(prompt.template, conversationState);
+
     const messages = history.map((m) => ({
       role: m.direction === 'out' ? ('assistant' as const) : ('user' as const),
       content: m.text ?? '',
@@ -99,6 +127,90 @@ export class BotResponseService {
       threadType: conversation.threadType as ThreadType,
       text: reply,
     });
+  }
+
+  private buildConversationState(input: {
+    botName: string;
+    userText: string;
+    ragContext: string;
+    recentHistory: string;
+    summary: string | null;
+  }): Record<string, string> {
+    return {
+      bot_name: input.botName,
+      user_message: input.userText,
+      rag_context: input.ragContext,
+      recent_history: input.recentHistory,
+      conversation_summary: input.summary ?? '',
+    };
+  }
+
+  private async conversationSummary(conversationId: number): Promise<string | null> {
+    return this.conversations.getSummary(conversationId);
+  }
+
+  private async updateRollingSummary(input: {
+    botName: string;
+    conversationId: number;
+    currentSummary: string | null;
+    olderMessages: Array<{ direction: string; text: string | null }>;
+    recentMessages: Array<{ direction: string; text: string | null }>;
+    maxChars: number;
+  }): Promise<string | null> {
+    const summary = await this.llm.chat({
+      system: [
+        'You summarize chat conversations for an assistant.',
+        'Keep the summary concise, factual, and useful for future replies.',
+        'Do not include verbatim dialogue unless it is a key commitment, preference, or decision.',
+        `Limit the final summary to about ${input.maxChars} characters or less.`,
+        'Return only the summary text.',
+      ].join('\n'),
+      messages: [
+        ...(input.currentSummary
+          ? [
+              {
+                role: 'user' as const,
+                content: `Current summary:\n${input.currentSummary.trim()}`,
+              },
+            ]
+          : []),
+        {
+          role: 'user' as const,
+          content: [
+            `Conversation: ${input.botName}`,
+            'Older messages to fold into the summary:',
+            this.formatSummaryInput(input.olderMessages),
+            'Recent messages to preserve as context:',
+            this.formatSummaryInput(input.recentMessages),
+            'Update the summary so it remains compact and captures only durable facts, goals, preferences, and unresolved topics.',
+          ].join('\n\n'),
+        },
+      ],
+      overrides: { temperature: 0.2 },
+    });
+
+    const normalized = this.normalizeSummary(summary, input.maxChars);
+    if (normalized === input.currentSummary?.trim()) return input.currentSummary;
+    await this.conversations.updateContextSnapshot(input.conversationId, normalized);
+    return normalized;
+  }
+
+  private formatSummaryInput(history: Array<{ direction: string; text: string | null }>): string {
+    if (history.length === 0) return '- (none)';
+    return history
+      .map((m) => `${m.direction === 'out' ? 'ASSISTANT' : 'USER'}: ${m.text ?? ''}`)
+      .join('\n');
+  }
+
+  private normalizeSummary(summary: string, maxChars: number): string {
+    const cleaned = summary.trim().replace(/^['"`]|['"`]$/g, '');
+    return cleaned.length > maxChars ? cleaned.slice(0, maxChars).trim() : cleaned;
+  }
+
+  private formatRecentHistory(history: Array<{ direction: string; text: string | null }>): string {
+    return history
+      .map((m) => `${m.direction === 'out' ? 'ASSISTANT' : 'USER'}: ${m.text ?? ''}`)
+      .join('\n');
   }
 
   private botOverrides(bot: Bot): LlmCallOverrides {

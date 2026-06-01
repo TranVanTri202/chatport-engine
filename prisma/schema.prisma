@@ -35,11 +35,14 @@ enum BotStatus {
 // =============== CORE ===============
 
 model Customer {
-  id        Int        @id @default(autoincrement())
-  name      String
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  bots      Bot[]
+  id           Int        @id @default(autoincrement())
+  email        String     @unique
+  name         String
+  picture      String?
+  firebaseUid  String?    @unique
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  bots         Bot[]
 }
 
 model Bot {

@@ -8,6 +8,11 @@ export const envValidationSchema = Joi.object({
   REDIS_URL: Joi.string().uri({ scheme: ['redis', 'rediss'] }).required(),
 
   OPENAI_API_KEY: Joi.string().required(),
+  FIREBASE_PROJECT_ID: Joi.string().required(),
+  FIREBASE_SERVICE_ACCOUNT_JSON: Joi.string().optional(),
+  FIREBASE_CLIENT_EMAIL: Joi.string().email().optional(),
+  FIREBASE_PRIVATE_KEY: Joi.string().optional(),
+
   LLM_MODEL: Joi.string().default('gpt-4o-mini'),
   LLM_TEMPERATURE: Joi.number().min(0).max(2).default(0.3),
   LLM_MAX_TOKENS: Joi.number().integer().min(1).max(8192).default(800),

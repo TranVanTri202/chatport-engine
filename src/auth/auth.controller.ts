@@ -1,36 +1,32 @@
 import { Body, Controller, Post } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import { ApiTags } from '@nestjs/swagger';
-import { IsInt, IsOptional, IsPositive, IsString } from 'class-validator';
+import { ApiProperty, ApiTags } from '@nestjs/swagger';
+import { IsIn, IsString } from 'class-validator';
 import { Public } from './public.decorator';
+import { AuthService, SocialProvider } from './auth.service';
+import { FirebaseAuthService } from './firebase-auth.service';
 
-/**
- * Placeholder login endpoint — issues a JWT given a customerId.
- * Replace with a real provider (email/password, OAuth, …) before production.
- */
-class LoginDto {
-  @IsInt()
-  @IsPositive()
-  customerId!: number;
+class FirebaseLoginDto {
+  @ApiProperty({ example: 'google', enum: ['google', 'facebook'] })
+  @IsIn(['google', 'facebook'])
+  provider!: SocialProvider;
 
-  @IsOptional()
+  @ApiProperty({ example: 'eyJhbGciOiJSUzI1NiIs...' })
   @IsString()
-  email?: string;
+  idToken!: string;
 }
 
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly jwt: JwtService) {}
+  constructor(
+    private readonly firebaseAuth: FirebaseAuthService,
+    private readonly authService: AuthService,
+  ) {}
 
   @Public()
-  @Post('login')
-  async login(@Body() body: LoginDto) {
-    const token = await this.jwt.signAsync({
-      sub: body.customerId,
-      customerId: body.customerId,
-      email: body.email,
-    });
-    return { accessToken: token };
+  @Post('social-login')
+  async socialLogin(@Body() body: FirebaseLoginDto) {
+    const profile = await this.firebaseAuth.verifyIdToken(body.idToken, body.provider);
+    return this.authService.loginWithFirebase(profile);
   }
 }
