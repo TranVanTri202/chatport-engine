@@ -29,50 +29,63 @@ export class ZaloNormalizer {
     raw: ZaloRawMessage;
   }): InboundMessage {
     const { botExternalId, raw } = input;
-    const { text, attachments } = this.extractContent(raw);
+    const payload = (raw.data ?? raw) as Partial<ZaloRawMessage['data']> &
+      Pick<
+        ZaloRawMessage,
+        'msgId' | 'msgType' | 'threadId' | 'threadType' | 'senderId' | 'senderName' | 'content' | 'ts' | 'quote' | 'mentions'
+      >;
+    const content = payload.content ?? raw.content;
+    const msgType = payload.msgType ?? raw.msgType ?? '';
+    const { text, attachments } = this.extractContent({ content, msgType });
+    const senderExternalId = String(payload.uidFrom ?? raw.senderId ?? '');
+    const threadId = String(raw.threadId ?? payload.uidFrom ?? payload.idTo ?? senderExternalId);
+    const quote = payload.quote ?? raw.quote;
+    const mentions = payload.mentions ?? raw.mentions;
 
     return {
       channel: ChannelType.zalo,
       botExternalId,
-      threadId: String(raw.threadId),
+      threadId,
       threadType: raw.threadType === 'group' ? ThreadType.group : ThreadType.user,
-      senderExternalId: String(raw.senderId),
-      senderName: raw.senderName,
-      messageExternalId: String(raw.msgId),
-      timestamp: Number(raw.ts ?? Date.now()),
+      senderExternalId,
+      senderName: payload.dName ?? raw.senderName,
+      messageExternalId: String(payload.msgId ?? raw.msgId ?? ''),
+      timestamp: Number(payload.ts ?? raw.ts ?? Date.now()),
       text,
       attachments,
-      quote: raw.quote
-        ? { messageExternalId: String(raw.quote.msgId), text: raw.quote.text }
+      quote: quote
+        ? { messageExternalId: String(quote.msgId), text: quote.text }
         : undefined,
-      mentions: raw.mentions?.map(String),
-      isSelf: String(raw.senderId) === botExternalId,
+      mentions: mentions?.map(String),
+      isSelf: senderExternalId === botExternalId,
       raw,
     };
   }
 
-  private extractContent(raw: ZaloRawMessage): {
+  private extractContent(input: {
+    content: unknown;
+    msgType: string;
+  }): {
     text?: string;
     attachments: InboundAttachment[];
   } {
-    const content = raw.content as unknown;
+    const { content, msgType } = input;
     if (typeof content === 'string') {
       return { text: content, attachments: [] };
     }
 
     const c = (content ?? {}) as Record<string, unknown>;
-    const msgType = raw.msgType ?? '';
     const href = typeof c.href === 'string' ? c.href : undefined;
 
     switch (msgType) {
       case 'chat.photo':
-        return { attachments: [{ type: 'image', url: href }] };
+        return { attachments: [{ type: 'image', url: href ?? '' }] };
       case 'chat.video.msg':
         return {
           attachments: [
             {
               type: 'video',
-              url: href,
+              url: href ?? '',
               meta: { duration: c.duration },
             },
           ],
@@ -82,7 +95,7 @@ export class ZaloNormalizer {
           attachments: [
             {
               type: 'file',
-              url: href,
+              url: href ?? '',
               mime: typeof c.fileType === 'string' ? c.fileType : undefined,
               size: typeof c.fileSize === 'number' ? c.fileSize : undefined,
             },
@@ -93,7 +106,7 @@ export class ZaloNormalizer {
           attachments: [
             {
               type: 'voice',
-              url: href,
+              url: href ?? '',
               size: typeof c.fileSize === 'number' ? c.fileSize : undefined,
             },
           ],
@@ -105,7 +118,7 @@ export class ZaloNormalizer {
           attachments: [
             {
               type: 'link',
-              url: href,
+              url: href ?? '',
               meta: {
                 title: c.title,
                 thumb: c.thumb,
@@ -122,14 +135,27 @@ export class ZaloNormalizer {
 
 /** Loose shape of an inbound zca-js message — kept local to the adapter. */
 export interface ZaloRawMessage {
-  msgId: string | number;
+  msgId?: string | number;
   msgType?: string;
-  threadId: string | number;
-  threadType: 'user' | 'group';
-  senderId: string | number;
+  threadId?: string | number;
+  threadType?: 'user' | 'group';
+  senderId?: string | number;
   senderName?: string;
-  content: unknown;
+  content?: unknown;
   ts?: number;
   quote?: { msgId: string | number; text?: string };
   mentions?: Array<string | number>;
+  data?: {
+    actionId?: string;
+    msgId?: string | number;
+    cliMsgId?: string;
+    msgType?: string;
+    uidFrom?: string | number;
+    idTo?: string | number;
+    dName?: string;
+    ts?: string | number;
+    content?: unknown;
+    quote?: { msgId: string | number; text?: string };
+    mentions?: Array<string | number>;
+  };
 }

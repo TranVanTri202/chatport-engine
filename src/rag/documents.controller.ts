@@ -21,26 +21,31 @@ import {
 import { DocumentService } from './document.service';
 import { IngestDocumentDto } from './dto/ingest-document.dto';
 import { ImportUrlDto, UploadDocumentMetaDto } from './dto/import-url.dto';
+import { ChannelType } from '@/shared/types';
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
 @ApiTags('documents')
 @ApiBearerAuth('jwt')
-@Controller('bots/:botId/documents')
+@Controller('bots/:channel/:externalId/documents')
 export class DocumentsController {
   constructor(private readonly documents: DocumentService) {}
 
   @Get()
-  list(@Param('botId', ParseIntPipe) botId: number) {
-    return this.documents.list(botId);
+  list(
+    @Param('channel') channel: ChannelType,
+    @Param('externalId') externalId: string,
+  ) {
+    return this.documents.list(channel, externalId);
   }
 
   @Post()
   ingest(
-    @Param('botId', ParseIntPipe) botId: number,
-    @Body() body: Omit<IngestDocumentDto, 'botId'>,
+    @Param('channel') channel: ChannelType,
+    @Param('externalId') externalId: string,
+    @Body() body: Omit<IngestDocumentDto, 'channel' | 'externalId'>,
   ) {
-    return this.documents.ingest({ ...body, botId } as IngestDocumentDto);
+    return this.documents.ingest({ ...body, channel, externalId } as IngestDocumentDto);
   }
 
   @Post('upload')
@@ -59,8 +64,9 @@ export class DocumentsController {
     FileInterceptor('file', { limits: { fileSize: MAX_UPLOAD_BYTES } }),
   )
   upload(
-    @Param('botId', ParseIntPipe) botId: number,
-    @Body() body: Omit<UploadDocumentMetaDto, 'botId'>,
+    @Param('channel') channel: ChannelType,
+    @Param('externalId') externalId: string,
+    @Body() body: Omit<UploadDocumentMetaDto, 'channel' | 'externalId'>,
     @UploadedFile(
       new ParseFilePipeBuilder()
         .addMaxSizeValidator({ maxSize: MAX_UPLOAD_BYTES })
@@ -70,7 +76,8 @@ export class DocumentsController {
   ) {
     if (!file) throw new BadRequestException('file is required');
     return this.documents.ingestFromFile({
-      botId,
+      channel,
+      externalId,
       overrideTitle: body.title,
       file: {
         originalname: file.originalname,
@@ -82,11 +89,13 @@ export class DocumentsController {
 
   @Post('import-url')
   importUrl(
-    @Param('botId', ParseIntPipe) botId: number,
-    @Body() body: Omit<ImportUrlDto, 'botId'>,
+    @Param('channel') channel: ChannelType,
+    @Param('externalId') externalId: string,
+    @Body() body: Omit<ImportUrlDto, 'channel' | 'externalId'>,
   ) {
     return this.documents.ingestFromUrl({
-      botId,
+      channel,
+      externalId,
       url: body.url,
       overrideTitle: body.title,
     });

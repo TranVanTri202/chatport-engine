@@ -13,6 +13,7 @@ import { AppClsModule } from '@/shared/context/cls.module';
 import { AppThrottlerModule } from '@/shared/throttler/throttler.module';
 import { GlobalExceptionFilter } from '@/shared/filters/global-exception.filter';
 import { LoggingInterceptor } from '@/shared/interceptors/logging.interceptor';
+import { ResponseTransformInterceptor } from '@/shared/interceptors/response-transform.interceptor';
 
 import { LlmModule } from '@/llm/llm.module';
 import { RagModule } from '@/rag/rag.module';
@@ -38,10 +39,35 @@ import { QuotaModule } from '@/quota/quota.module';
       useFactory: (cfg: AppConfig) => ({
         pinoHttp: {
           level: cfg.logLevel,
+          autoLogging: false,
+          customProps: () => ({}),
           transport:
             cfg.nodeEnv === 'development'
-              ? { target: 'pino-pretty', options: { singleLine: true } }
+              ? {
+                  target: 'pino-pretty',
+                  options: {
+                    singleLine: true,
+                    translateTime: 'SYS:standard',
+                    ignore: 'pid,hostname',
+                  },
+                }
               : undefined,
+          serializers: {
+            req(req) {
+              return {
+                id: req.id,
+                method: req.method,
+                url: req.url,
+                remoteAddress:
+                  req.socket?.remoteAddress ?? req.remoteAddress ?? '-',
+              };
+            },
+            res(res) {
+              return {
+                statusCode: res.statusCode,
+              };
+            },
+          },
         },
       }),
     }),
@@ -72,6 +98,7 @@ import { QuotaModule } from '@/quota/quota.module';
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
     { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: ResponseTransformInterceptor },
   ],
 })
 export class AppModule {}

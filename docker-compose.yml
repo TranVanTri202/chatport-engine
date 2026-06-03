@@ -1,8 +1,6 @@
-version: "3.9"
-
 services:
   postgres:
-    image: pgvector/pgvector:pg16-alpine
+    image: pgvector/pgvector:pg16
     container_name: askbase-postgres
     restart: unless-stopped
     environment:
@@ -47,11 +45,20 @@ services:
       redis:
         condition: service_healthy
     env_file: .env
+    command: pnpm start:dev
     environment:
+      PORT: 5001
       DATABASE_URL: postgresql://askbase:askbase@postgres:5432/askbase?schema=public
       REDIS_URL: redis://redis:6379
+      ZALO_QR_PATH: /tmp/qr.png
     ports:
-      - "3000:3000"
+      - "5001:5001"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - ./storage:/app/storage
+    user: "0:0"
+    entrypoint: ["sh", "-c", "exec pnpm start:dev"]
 
 volumes:
   pgdata:

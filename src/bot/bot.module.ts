@@ -4,7 +4,6 @@ import { BotController } from './bot.controller';
 import { BotResponseService } from './bot-response.service';
 import { BotRepository } from './repositories/bot.repository';
 import { ConversationsModule } from '@/conversations/conversations.module';
-import { PromptsModule } from '@/prompts/prompts.module';
 import { RagModule } from '@/rag/rag.module';
 import { LlmModule } from '@/llm/llm.module';
 import { MessagingModule } from '@/messaging/messaging.module';
@@ -12,9 +11,8 @@ import { QuotaModule } from '@/quota/quota.module';
 
 @Module({
   imports: [
-    ConversationsModule,
-    PromptsModule,
-    RagModule,
+    forwardRef(() => ConversationsModule),
+    forwardRef(() => RagModule),
     LlmModule,
     forwardRef(() => MessagingModule),
     forwardRef(() => QuotaModule),

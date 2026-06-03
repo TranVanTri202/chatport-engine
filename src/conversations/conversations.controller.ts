@@ -16,18 +16,22 @@ import {
 
 @ApiTags('conversations')
 @ApiBearerAuth('jwt')
-@Controller('conversations')
+@Controller('bots/:channel/:externalId/conversations')
 export class ConversationsController {
   constructor(
     private readonly conversations: ConversationService,
     private readonly messageService: MessageService,
   ) {}
 
-  /** Conversation list for a bot. Cursor pagination (sort by lastMessageAt desc). */
   @Get()
-  list(@Query() query: ListConversationsQuery) {
+  list(
+    @Param('channel') channel: string,
+    @Param('externalId') externalId: string,
+    @Query() query: ListConversationsQuery,
+  ) {
     return this.conversations.listForBot({
-      botId: query.botId,
+      channel: channel as any,
+      externalId,
       limit: query.limit,
       cursor: query.cursor,
     });
@@ -38,7 +42,6 @@ export class ConversationsController {
     return this.conversations.getById(id);
   }
 
-  /** Paginated chat history (newest first). `cursor` = last seen messageId. */
   @Get(':id/messages')
   messages(
     @Param('id', ParseIntPipe) id: number,

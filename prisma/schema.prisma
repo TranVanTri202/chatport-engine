@@ -92,17 +92,22 @@ model BotSession {
 }
 
 model Conversation {
-  id               Int           @id @default(autoincrement())
-  botId            Int
-  threadType       ThreadType
-  threadExternalId String
-  title            String?
-  unread           Int           @default(0)
-  lastMessageAt    DateTime?
-  metadata         Json          @default("{}")
-  bot              Bot           @relation(fields: [botId], references: [id])
-  messages         Message[]
-  participants     Participant[]
+  id                     Int           @id @default(autoincrement())
+  botId                  Int
+  threadType             ThreadType
+  threadExternalId       String
+  title                  String?
+  unread                 Int           @default(0)
+  lastMessageAt          DateTime?
+  lastMessageText        String?       @db.Text
+  lastMessageSenderId    String?
+  lastMessageSenderName  String?
+  lastMessageSenderAvatar String?
+  lastMessageDirection   MessageDirection?
+  metadata               Json          @default("{}")
+  bot                    Bot           @relation(fields: [botId], references: [id])
+  messages               Message[]
+  participants           Participant[]
 
   @@unique([botId, threadExternalId])
   @@index([botId, lastMessageAt])

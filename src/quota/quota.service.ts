@@ -48,16 +48,16 @@ export class QuotaService {
     const bot = await this.bots.findById(botId);
     if (!bot) throw new NotFoundException(`Bot ${botId} not found`);
 
-    // Filter out IDs already attached — those are no-op upserts, not consumption.
-    const existing = await this.prisma.botDocument.findMany({
-      where: { botId, documentId: { in: newDocIds } },
-      select: { documentId: true },
+    // Filter out IDs already attached — those are no-op updates, not consumption.
+    const existing = await this.prisma.document.findMany({
+      where: { botId, id: { in: newDocIds } },
+      select: { id: true },
     });
-    const existingSet = new Set(existing.map((e) => e.documentId));
+    const existingSet = new Set(existing.map((e) => e.id));
     const trulyNew = newDocIds.filter((id) => !existingSet.has(id));
     if (trulyNew.length === 0) return;
 
-    const currentCount = await this.bots.countAttachedDocuments(botId);
+    const currentCount = await this.bots.listDocuments(botId).then((docs) => docs.length);
     const projected = currentCount + trulyNew.length;
     if (projected > bot.documentQuota) {
       throw new QuotaExceededError(
@@ -72,7 +72,7 @@ export class QuotaService {
   async summary(botId: number) {
     const bot = await this.bots.findById(botId);
     if (!bot) throw new NotFoundException(`Bot ${botId} not found`);
-    const docCount = await this.bots.countAttachedDocuments(botId);
+    const docCount = await this.bots.listDocuments(botId).then((docs) => docs.length);
     return {
       request: {
         used: bot.requestUsed,

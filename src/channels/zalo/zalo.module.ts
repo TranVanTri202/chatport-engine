@@ -7,6 +7,8 @@ import { ZaloInstanceRegistry } from './zalo-instance.registry';
 import { ZaloSessionService } from './zalo-session.service';
 import { ZaloNormalizer } from './zalo.normalizer';
 import { ZaloListeners } from './zalo.listeners';
+import { ZaloQrStorageService } from './zalo-qr-storage.service';
+import { ZaloZcaService } from './zalo-zca.service';
 
 @Module({
   imports: [forwardRef(() => MessagingModule)],
@@ -17,8 +19,10 @@ import { ZaloListeners } from './zalo.listeners';
     ZaloSessionService,
     ZaloNormalizer,
     ZaloListeners,
+    ZaloQrStorageService,
+    ZaloZcaService,
   ],
-  exports: [ZaloAdapter],
+  exports: [ZaloAdapter, ZaloZcaService],
 })
 export class ZaloModule implements OnApplicationBootstrap {
   private readonly logger = new Logger(ZaloModule.name);

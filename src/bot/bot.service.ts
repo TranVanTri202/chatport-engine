@@ -1,5 +1,6 @@
 import { forwardRef, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Bot, Prisma } from '@prisma/client';
+import { ChannelType } from '@/shared/types';
 import { QuotaService } from '@/quota/quota.service';
 import { BotRepository } from './repositories/bot.repository';
 import { BotSettingsDto, CreateBotDto, UpdateBotDto } from './dto/create-bot.dto';
@@ -52,13 +53,19 @@ export class BotService {
     };
   }
 
-  getSystemPrompt(botId: number): Promise<string | null> {
-    return this.repo.getSystemPrompt(botId);
+  async getByExternal(channel: ChannelType, externalId: string): Promise<Bot> {
+    const bot = await this.repo.findByExternal(channel, externalId);
+    if (!bot) throw new NotFoundException(`Bot ${channel}:${externalId} not found`);
+    return bot;
   }
 
-  async updateSystemPrompt(botId: number, systemPrompt: string): Promise<Bot> {
-    await this.get(botId);
-    return this.repo.update(botId, { systemPrompt });
+  getSystemPrompt(channel: ChannelType, externalId: string): Promise<string | null> {
+    return this.getByExternal(channel, externalId).then((bot) => bot.systemPrompt ?? null);
+  }
+
+  async updateSystemPrompt(channel: ChannelType, externalId: string, systemPrompt: string): Promise<Bot> {
+    const bot = await this.getByExternal(channel, externalId);
+    return this.repo.update(bot.id, { systemPrompt });
   }
 
   create(dto: CreateBotDto): Promise<Bot> {
@@ -85,9 +92,10 @@ export class BotService {
     await this.repo.delete(id);
   }
 
-  async attachDocuments(botId: number, dto: AttachDocumentsDto): Promise<void> {
-    await this.quota.assertCanAttachDocuments(botId, dto.documentIds);
-    await this.repo.attachDocuments(botId, dto.documentIds);
+  async attachDocuments(channel: ChannelType, externalId: string, dto: { documentIds: number[] }): Promise<void> {
+    const bot = await this.getByExternal(channel, externalId);
+    await this.quota.assertCanAttachDocuments(bot.id, dto.documentIds);
+    await this.repo.attachDocuments(bot.id, dto.documentIds);
   }
 
   private mapSettings(s?: BotSettingsDto): Prisma.BotUpdateInput {

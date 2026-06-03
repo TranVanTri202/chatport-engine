@@ -2,7 +2,8 @@ import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class IngestDocumentDto {
   /** Server-injected from route or bot context — not validated as input. */
-  botId!: number;
+  channel!: string;
+  externalId!: string;
 
   @IsString()
   @MaxLength(200)

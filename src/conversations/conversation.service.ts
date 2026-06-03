@@ -3,12 +3,27 @@ import { Bot, Conversation, Prisma } from '@prisma/client';
 import { PrismaService } from '@/shared/prisma/prisma.service';
 import { ChannelType, ThreadType } from '@/shared/types';
 import { InboundMessageDto } from '@/messaging/dto/inbound-message.dto';
+import { ZaloZcaService } from '@/channels/zalo/zalo-zca.service';
 
 const DEFAULT_LIST_LIMIT = 30;
 
+export type ConversationListItem = Conversation & {
+  participants: Array<{
+    id: number;
+    conversationId: number;
+    externalId: string;
+    displayName: string | null;
+    avatar: string | null;
+    isBot: boolean;
+  }>;
+};
+
 @Injectable()
 export class ConversationService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly zaloZcaService: ZaloZcaService,
+  ) {}
 
   /** Resolve the Bot row addressed by (channel, botExternalId). */
   async getBotByExternal(channel: ChannelType, externalId: string): Promise<Bot> {
@@ -21,6 +36,36 @@ export class ConversationService {
     return bot;
   }
 
+  private async resolveUserProfile(
+    channel: ChannelType,
+    botExternalId: string,
+    userId: string,
+  ) {
+    if (channel !== 'zalo') return null;
+
+    const cachedParticipant = await this.prisma.participant.findFirst({
+      where: {
+        externalId: userId,
+        conversation: {
+          bot: {
+            channel,
+            externalId: botExternalId,
+          },
+        },
+      },
+      select: {
+        displayName: true,
+        avatar: true,
+      },
+    });
+
+    if (cachedParticipant?.displayName || cachedParticipant?.avatar) {
+      return cachedParticipant;
+    }
+
+    return this.zaloZcaService.getUserProfile(botExternalId, userId);
+  }
+
   /**
    * Upsert the Conversation + Participant rows for an incoming message,
    * returning the resolved Bot so handlers don't need a second lookup.
@@ -29,6 +74,8 @@ export class ConversationService {
     msg: InboundMessageDto,
   ): Promise<{ conversation: Conversation; bot: Bot }> {
     const bot = await this.getBotByExternal(msg.channel, msg.botExternalId);
+
+    const senderProfile = await this.resolveUserProfile(msg.channel, msg.botExternalId, msg.senderExternalId);
 
     const conversation = await this.prisma.conversation.upsert({
       where: {
@@ -41,12 +88,14 @@ export class ConversationService {
         botId: bot.id,
         threadType: msg.threadType,
         threadExternalId: msg.threadId,
+        title: senderProfile?.displayName ?? null,
         lastMessageAt: new Date(msg.timestamp),
         unread: 1,
       },
       update: {
         lastMessageAt: new Date(msg.timestamp),
         unread: { increment: 1 },
+        ...(senderProfile?.displayName ? { title: senderProfile.displayName } : {}),
       },
     });
 
@@ -60,10 +109,14 @@ export class ConversationService {
       create: {
         conversationId: conversation.id,
         externalId: msg.senderExternalId,
-        displayName: msg.senderName,
+        displayName: senderProfile?.displayName ?? msg.senderName,
+        avatar: senderProfile?.avatar ?? null,
         isBot: msg.senderExternalId === bot.externalId,
       },
-      update: msg.senderName ? { displayName: msg.senderName } : {},
+      update: {
+        ...(senderProfile?.displayName || msg.senderName ? { displayName: senderProfile?.displayName ?? msg.senderName } : {}),
+        ...(senderProfile?.avatar ? { avatar: senderProfile.avatar } : {}),
+      },
     });
 
     return { conversation, bot };
@@ -94,13 +147,20 @@ export class ConversationService {
    * share the same `lastMessageAt` (e.g. just after seeding).
    */
   async listForBot(input: {
-    botId: number;
+    channel: ChannelType;
+    externalId: string;
     limit?: number;
     cursor?: number;
   }) {
+    const bot = await this.getBotByExternal(input.channel, input.externalId);
     const take = input.limit ?? DEFAULT_LIST_LIMIT;
     const rows = await this.prisma.conversation.findMany({
-      where: { botId: input.botId },
+      where: { botId: bot.id },
+      include: {
+        participants: {
+          orderBy: [{ isBot: 'asc' }, { id: 'asc' }],
+        },
+      },
       orderBy: [{ lastMessageAt: 'desc' }, { id: 'desc' }],
       take: take + 1,
       ...(input.cursor !== undefined && {
@@ -123,6 +183,26 @@ export class ConversationService {
     });
     if (!c) throw new NotFoundException(`Conversation ${id} not found`);
     return c;
+  }
+
+  async listMessages(conversationId: number, limit?: number, cursor?: string) {
+    const take = limit ?? 20;
+    const cursorBigInt = cursor ? BigInt(cursor) : undefined;
+    const rows = await this.prisma.message.findMany({
+      where: { conversationId },
+      orderBy: { id: 'desc' },
+      take: take + 1,
+      ...(cursorBigInt !== undefined && {
+        cursor: { id: cursorBigInt },
+        skip: 1,
+      }),
+    });
+    const hasMore = rows.length > take;
+    const items = hasMore ? rows.slice(0, take) : rows;
+    return {
+      items,
+      nextCursor: hasMore ? items[items.length - 1]!.id.toString() : null,
+    };
   }
 
   async getSummary(id: number): Promise<string | null> {

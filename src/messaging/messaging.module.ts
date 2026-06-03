@@ -24,7 +24,7 @@ import { SendMessageHandler } from './commands/send-message.handler';
       { name: MESSAGING_OUTBOUND_QUEUE },
     ),
     CqrsModule,
-    ConversationsModule,
+    forwardRef(() => ConversationsModule),
     RealtimeModule,
     forwardRef(() => BotModule),
     QuotaModule,

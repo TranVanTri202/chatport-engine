@@ -1,6 +1,7 @@
 import { BullModule } from '@nestjs/bullmq';
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { RAG_EMBED_QUEUE } from '@/shared/types';
+import { BotModule } from '@/bot/bot.module';
 import { ChunkerService } from './chunker.service';
 import { DocumentService } from './document.service';
 import { DocumentsController } from './documents.controller';
@@ -13,7 +14,7 @@ import { GoogleDocsLoaderService } from './loaders/google-docs-loader.service';
 import { DocumentRepository } from './repositories/document.repository';
 
 @Module({
-  imports: [BullModule.registerQueue({ name: RAG_EMBED_QUEUE })],
+  imports: [BullModule.registerQueue({ name: RAG_EMBED_QUEUE }), forwardRef(() => BotModule)],
   controllers: [DocumentsController],
   providers: [
     ChunkerService,

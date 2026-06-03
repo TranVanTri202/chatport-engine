@@ -6,18 +6,9 @@ import {
   NestInterceptor,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { Observable, tap } from 'rxjs';
 
-/**
- * Per-request access log with duration + requestId.
- *
- *  - Adds `X-Request-Id` to every response.
- *  - Reuses inbound `X-Request-Id` if the upstream LB / FE sent one.
- *  - Skips WebSocket / RPC contexts (those have their own lifecycle).
- *
- * Stack with the global `GlobalExceptionFilter` — the filter also reads
- * `req.id` to surface it in error bodies.
- */
 @Injectable()
 export class LoggingInterceptor implements NestInterceptor {
   private readonly logger = new Logger('HTTP');
@@ -25,6 +16,7 @@ export class LoggingInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     if (context.getType() !== 'http') return next.handle();
 
+    const startedAt = performance.now();
     const http = context.switchToHttp();
     const req = http.getRequest<{
       id?: string;
@@ -32,6 +24,7 @@ export class LoggingInterceptor implements NestInterceptor {
       originalUrl?: string;
       url?: string;
       headers: Record<string, string | string[] | undefined>;
+      ip?: string;
     }>();
     const res = http.getResponse<{
       statusCode: number;
@@ -44,18 +37,18 @@ export class LoggingInterceptor implements NestInterceptor {
     req.id = requestId;
     res.setHeader('X-Request-Id', requestId);
 
-    const start = Date.now();
     const route = `${req.method} ${req.originalUrl ?? req.url}`;
+    const ip = req.ip ?? '-';
 
     return next.handle().pipe(
       tap({
         next: () => {
-          const ms = Date.now() - start;
-          this.logger.log(`${route} ${res.statusCode} ${ms}ms [${requestId}]`);
+          const duration = Math.round(performance.now() - startedAt);
+          this.logger.log(`${route} - ${res.statusCode} - ${duration}ms`);
         },
         error: () => {
-          const ms = Date.now() - start;
-          this.logger.warn(`${route} ERR ${ms}ms [${requestId}]`);
+          const duration = Math.round(performance.now() - startedAt);
+          this.logger.warn(`${ip} - ${route} - ERR - ${duration}ms`);
         },
       }),
     );

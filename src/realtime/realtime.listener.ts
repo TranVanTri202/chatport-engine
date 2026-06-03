@@ -55,7 +55,7 @@ export class RealtimeListener {
 
   @OnEvent(DOMAIN_EVENTS.DocumentStatusChanged)
   onDocStatus(e: DocumentStatusChangedEvent): void {
-    this.gateway.emitToCustomer(e.document.customerId, 'document:status', {
+    this.gateway.emitToCustomer(e.document.botId, 'document:status', {
       documentId: e.document.id,
       from: e.from,
       to: e.to,

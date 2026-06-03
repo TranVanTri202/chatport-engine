@@ -44,20 +44,13 @@ export class TelegramAdapter implements IChannelAdapter, OnModuleInit {
   }
 
   async registerBot(botId: number, botToken: string, webhookUrl?: string): Promise<void> {
-    const { Telegraf } = await import('telegraf');
-    const bot = new Telegraf(botToken);
+    void botId;
+    void botToken;
+    void webhookUrl;
 
-    this.listeners.attach(bot, String(botId));
-
-    if (webhookUrl) {
-      await bot.telegram.setWebhook(webhookUrl);
-    } else {
-      await bot.launch();
-    }
-
-    this.instances.set(String(botId), bot);
-    await this.sessions.save(botId, { botToken, webhookUrl });
-    this.logger.log(`Telegram bot registered: ${botId}`);
+    throw new Error(
+      'Telegram support is disabled in this environment because the telegraf package is not installed.',
+    );
   }
 
   async restore(botId: number): Promise<void> {

@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
 import { ChannelType, ThreadType } from '@/shared/types';
+import { ZaloQrStorageService } from './zalo-qr-storage.service';
 import {
   ChannelOfflineError,
   ChannelSendError,
@@ -17,9 +17,8 @@ import {
 import { ChannelRegistry } from '../channel-registry.service';
 import { ZaloInstanceRegistry } from './zalo-instance.registry';
 import { ZaloSessionService, ZaloSessionPayload } from './zalo-session.service';
-import { ZaloNormalizer } from './zalo.normalizer';
 import { ZaloListeners } from './zalo.listeners';
-import { MessagingPublisher } from '@/messaging/messaging.publisher';
+import { PrismaService } from '@/shared/prisma/prisma.service';
 
 @Injectable()
 export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
@@ -31,9 +30,9 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
     private readonly registry: ChannelRegistry,
     private readonly instances: ZaloInstanceRegistry,
     private readonly sessions: ZaloSessionService,
-    private readonly normalizer: ZaloNormalizer,
     private readonly listeners: ZaloListeners,
-    private readonly publisher: MessagingPublisher,
+    private readonly qrStorage: ZaloQrStorageService,
+    private readonly prisma: PrismaService,
   ) {}
 
   onModuleInit(): void {
@@ -44,49 +43,111 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
     const sessionId = randomUUID();
     const { Zalo } = await import('zca-js');
     const zalo = new Zalo({ selfListen: false, checkUpdate: true, logging: true });
-    const qrPath = join(process.cwd(), 'qr.png');
+    this.qrStorage.ensureExists();
+    const qrPath = this.qrStorage.getQrPath();
+    this.logger.log(`Zalo QR output path: ${qrPath}`);
 
-    void zalo.loginQR(
-      { userAgent: 'AskBase_BE', qrPath },
-      async (event) => {
-        const type = event.type;
-        if (type === 0) {
-          this.logger.log(`Zalo QR generated for customer=${input.customerId}`);
-          return;
-        }
-        if (type === 1) {
-          this.logger.warn(`Zalo QR expired for customer=${input.customerId}`);
-          return;
-        }
-        if (type === 2) {
-          this.logger.log(`Zalo QR scanned by ${event.data.display_name}`);
-          return;
-        }
-        if (type === 3) {
-          this.logger.warn(`Zalo QR declined: ${event.data.code}`);
-          return;
-        }
-        if (type === 4) {
-          const payload: ZaloSessionPayload = {
-            cookie: event.data.cookie,
-            imei: event.data.imei,
-            userAgent: event.data.userAgent,
-          };
-          await this.sessions.save(input.customerId, payload);
-          const api = zalo;
-          const context = typeof api.getContext === 'function' ? api.getContext() : null;
-          const botExternalId = String(context?.uid ?? input.customerId);
-          this.instances.set(botExternalId, api);
-          this.listeners.attach(api, { id: input.customerId, externalId: botExternalId });
-          this.logger.log(`Zalo login success for customer=${input.customerId}`);
-        }
-      },
-    );
+    let loginPayload: ZaloSessionPayload | null = null;
+    let botName = 'Zalo Bot';
+    let botAvatar: string | null = null;
 
-    return {
-      sessionId,
-      hint: { kind: 'qr', data: { sessionId, qrPath, qrBase64Url: '/channels/zalo/qr' } },
-    };
+    try {
+      const api = await zalo.loginQR(
+        { qrPath },
+        async (event) => {
+          const type = event.type;
+          if (type === 0) {
+            this.logger.log(`Zalo QR generated for customer=${input.customerId}`);
+            await event.actions.saveToFile(qrPath);
+            this.logger.log(`Zalo QR saved to file for customer=${input.customerId}: ${qrPath}`);
+            return;
+          }
+          if (type === 1) {
+            this.logger.warn(`Zalo QR expired for customer=${input.customerId}`);
+            return;
+          }
+          if (type === 2) {
+            botName = event.data?.display_name || botName;
+            botAvatar = event.data?.avatar || botAvatar;
+            this.logger.log(`Zalo QR scanned by ${botName}`);
+            return;
+          }
+          if (type === 3) {
+            this.logger.warn(`Zalo QR declined: ${event.data.code}`);
+            return;
+          }
+          if (type === 4) {
+            loginPayload = {
+              cookie: event.data.cookie,
+              imei: event.data.imei,
+              userAgent: event.data.userAgent,
+            };
+          }
+        },
+      );
+
+      if (!loginPayload) {
+        throw new Error('Zalo login completed but session payload was not returned');
+      }
+
+      this.logger.log(`Zalo login API resolved for customer=${input.customerId}`);
+      const apiAny = api as any;
+      const context = typeof apiAny?.getContext === 'function' ? apiAny.getContext() : null;
+      const botExternalId = String(context?.uid ?? input.customerId);
+
+      try {
+        if (typeof apiAny.fetchAccountInfo === 'function') {
+          const infoBot = await apiAny.fetchAccountInfo();
+          const profile = infoBot?.profile;
+          if (profile) {
+            botName = profile.zaloName || botName;
+            botAvatar = profile.avatar || botAvatar;
+          }
+        }
+      } catch (e) {
+        this.logger.warn(`Failed to fetch account info from api: ${(e as Error).message}`);
+      }
+
+      // 1. Create or update Bot in database
+      const bot = await this.prisma.bot.upsert({
+        where: {
+          channel_externalId: {
+            channel: ChannelType.zalo,
+            externalId: botExternalId,
+          },
+        },
+        create: {
+          customerId: input.customerId,
+          channel: ChannelType.zalo,
+          externalId: botExternalId,
+          name: botName,
+          avatar: botAvatar,
+          status: 'active',
+        },
+        update: {
+          customerId: input.customerId,
+          name: botName,
+          avatar: botAvatar,
+          status: 'active',
+        },
+      });
+
+      // 2. Save session using the Bot's ID
+      await this.sessions.save(bot.id, loginPayload);
+
+      // 3. Keep in memory and attach listeners
+      this.instances.set(botExternalId, api);
+      this.listeners.attach(api, { id: bot.id, externalId: botExternalId });
+      this.logger.log(`Zalo login success and saved for customer=${input.customerId}, botId=${bot.id}`);
+
+      return {
+        sessionId: String(bot.id),
+        hint: { kind: 'none', data: bot }
+      };
+    } catch (err) {
+      this.logger.error(`Zalo startLogin failed for customer=${input.customerId}: ${(err as Error).message}`);
+      throw err;
+    }
   }
 
   async restore(botId: number): Promise<void> {
@@ -96,12 +157,13 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
     const { Zalo } = await import('zca-js');
     const zalo = new Zalo({ selfListen: false, checkUpdate: false, logging: false });
     const api = await zalo.login({
-      cookie: session.cookie,
+      cookie: session.cookie as any,
       imei: session.imei,
       userAgent: session.userAgent,
     });
 
-    const context = typeof api?.getContext === 'function' ? api.getContext() : null;
+    const apiAny = api as any;
+    const context = typeof apiAny?.getContext === 'function' ? apiAny.getContext() : null;
     const botExternalId = String(context?.uid ?? botId);
 
     this.instances.set(botExternalId, api);

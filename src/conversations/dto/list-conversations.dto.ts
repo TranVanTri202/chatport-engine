@@ -2,11 +2,6 @@ import { Type } from 'class-transformer';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
 
 export class ListConversationsQuery {
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  botId!: number;
-
   @IsOptional()
   @Type(() => Number)
   @IsInt()

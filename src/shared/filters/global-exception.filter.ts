@@ -19,14 +19,13 @@ import {
 import { QuotaExceededError } from '@/shared/errors/quota.errors';
 
 interface ErrorBody {
-  ok: false;
-  error: {
-    code: string;
-    message: string;
-    requestId: string;
-    /** Only set in non-prod. */
-    detail?: unknown;
-  };
+  code: number;
+  message: string;
+  data: null;
+  requestId: string;
+  errorCode: string;
+  /** Only set in non-prod. */
+  detail?: unknown;
 }
 
 /**
@@ -55,12 +54,12 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     if (status >= 500) {
       this.logger.error(
-        `${req?.method} ${req?.url} → ${status} (${body.error.code}) ${body.error.message}`,
+        `${req?.method} ${req?.url} → ${status} (${body.errorCode}) ${body.message}`,
         (exception as Error)?.stack,
       );
     } else {
       this.logger.warn(
-        `${req?.method} ${req?.url} → ${status} (${body.error.code}) ${body.error.message}`,
+        `${req?.method} ${req?.url} → ${status} (${body.errorCode}) ${body.message}`,
       );
     }
 
@@ -82,6 +81,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       return {
         status,
         body: this.body(
+          status,
           requestId,
           this.codeFromStatus(status),
           Array.isArray(message) ? message.join('; ') : message,
@@ -93,17 +93,16 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       return {
         status: HttpStatus.PAYMENT_REQUIRED,
         body: {
-          ok: false,
-          error: {
-            code: `QUOTA_${exception.kind.toUpperCase()}_EXCEEDED`,
-            message: exception.message,
-            requestId,
-            detail: {
-              kind: exception.kind,
-              botId: exception.botId,
-              used: exception.used,
-              limit: exception.limit,
-            },
+          code: HttpStatus.PAYMENT_REQUIRED,
+          message: exception.message,
+          data: null,
+          requestId,
+          errorCode: `QUOTA_${exception.kind.toUpperCase()}_EXCEEDED`,
+          detail: {
+            kind: exception.kind,
+            botId: exception.botId,
+            used: exception.used,
+            limit: exception.limit,
           },
         },
       };
@@ -112,31 +111,51 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     if (exception instanceof ChannelExpiredError) {
       return {
         status: HttpStatus.SERVICE_UNAVAILABLE,
-        body: this.body(requestId, 'CHANNEL_EXPIRED', exception.message),
+        body: this.body(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          requestId,
+          'CHANNEL_EXPIRED',
+          exception.message,
+        ),
       };
     }
     if (exception instanceof ChannelOfflineError) {
       return {
         status: HttpStatus.SERVICE_UNAVAILABLE,
-        body: this.body(requestId, 'CHANNEL_OFFLINE', exception.message),
+        body: this.body(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          requestId,
+          'CHANNEL_OFFLINE',
+          exception.message,
+        ),
       };
     }
     if (exception instanceof ChannelRateLimitedError) {
       return {
         status: HttpStatus.TOO_MANY_REQUESTS,
-        body: this.body(requestId, 'CHANNEL_RATE_LIMITED', exception.message),
+        body: this.body(
+          HttpStatus.TOO_MANY_REQUESTS,
+          requestId,
+          'CHANNEL_RATE_LIMITED',
+          exception.message,
+        ),
       };
     }
     if (exception instanceof ChannelError) {
       return {
         status: HttpStatus.BAD_GATEWAY,
-        body: this.body(requestId, 'CHANNEL_ERROR', exception.message),
+        body: this.body(
+          HttpStatus.BAD_GATEWAY,
+          requestId,
+          'CHANNEL_ERROR',
+          exception.message,
+        ),
       };
     }
     if (exception instanceof LockedError) {
       return {
         status: 423,
-        body: this.body(requestId, 'LOCKED', exception.message),
+        body: this.body(423, requestId, 'LOCKED', exception.message),
       };
     }
 
@@ -148,6 +167,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     return {
       status: HttpStatus.INTERNAL_SERVER_ERROR,
       body: this.body(
+        HttpStatus.INTERNAL_SERVER_ERROR,
         requestId,
         'INTERNAL',
         err?.message ?? 'Internal server error',
@@ -163,17 +183,28 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       case 'P2025':
         return {
           status: HttpStatus.NOT_FOUND,
-          body: this.body(requestId, 'NOT_FOUND', 'Resource not found'),
+          body: this.body(
+            HttpStatus.NOT_FOUND,
+            requestId,
+            'NOT_FOUND',
+            'Resource not found',
+          ),
         };
       case 'P2002':
         return {
           status: HttpStatus.CONFLICT,
-          body: this.body(requestId, 'CONFLICT', 'Unique constraint violated'),
+          body: this.body(
+            HttpStatus.CONFLICT,
+            requestId,
+            'CONFLICT',
+            'Unique constraint violated',
+          ),
         };
       case 'P2003':
         return {
           status: HttpStatus.BAD_REQUEST,
           body: this.body(
+            HttpStatus.BAD_REQUEST,
             requestId,
             'FK_VIOLATION',
             'Foreign key constraint failed',
@@ -182,13 +213,31 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       default:
         return {
           status: HttpStatus.BAD_REQUEST,
-          body: this.body(requestId, `PRISMA_${err.code}`, err.message),
+          body: this.body(
+            HttpStatus.BAD_REQUEST,
+            requestId,
+            `PRISMA_${err.code}`,
+            err.message,
+          ),
         };
     }
   }
 
-  private body(requestId: string, code: string, message: string): ErrorBody {
-    return { ok: false, error: { code, message, requestId } };
+  private body(
+    status: number,
+    requestId: string,
+    errorCode: string,
+    message: string,
+    detail?: unknown,
+  ): ErrorBody {
+    return {
+      code: status,
+      message,
+      data: null,
+      requestId,
+      errorCode,
+      ...(detail === undefined ? {} : { detail }),
+    };
   }
 
   private codeFromStatus(status: number): string {

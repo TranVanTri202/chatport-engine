@@ -12,8 +12,6 @@ import { MessagingPublisher } from '@/messaging/messaging.publisher';
 import { ReplyPolicyService } from '@/messaging/reply-policy.service';
 import { MessageService } from '@/conversations/message.service';
 import { ConversationService } from '@/conversations/conversation.service';
-import { PromptService } from '@/prompts/prompt.service';
-import { PromptRendererService } from '@/prompts/prompt-renderer.service';
 import { RetrievalService } from '@/rag/retrieval.service';
 import { LlmService } from '@/llm/llm.service';
 import { LlmCallOverrides } from '@/llm/llm-settings';
@@ -36,8 +34,6 @@ export class BotResponseService {
     private readonly publisher: MessagingPublisher,
     private readonly messages: MessageService,
     private readonly conversations: ConversationService,
-    private readonly prompts: PromptService,
-    private readonly renderer: PromptRendererService,
     private readonly retrieval: RetrievalService,
     private readonly llm: LlmService,
     private readonly config: AppConfig,
@@ -49,12 +45,11 @@ export class BotResponseService {
   async onMessageReceived(event: MessageReceivedEvent): Promise<void> {
     const { bot, conversation, inbound } = event;
 
-    if (bot.promptId == null) return;
     if (bot.status !== 'active') return;
     if (!this.policy.shouldConsider({ bot, conversation, inbound })) return;
 
-    const prompt = await this.prompts.get(bot.promptId);
-    if (!prompt) return;
+    const systemPrompt = bot.systemPrompt?.trim();
+    if (!systemPrompt) return;
 
     // Quota gate — fail fast before doing any LLM/RAG work. Quota exhaustion
     // on the auto-reply path is a silent skip (we still persisted the
@@ -105,7 +100,7 @@ export class BotResponseService {
       summary,
     });
 
-    const system = this.renderer.render(prompt.template, conversationState);
+    const system = this.interpolateSystemPrompt(systemPrompt, conversationState);
 
     const messages = history.map((m) => ({
       role: m.direction === 'out' ? ('assistant' as const) : ('user' as const),
@@ -143,6 +138,10 @@ export class BotResponseService {
       recent_history: input.recentHistory,
       conversation_summary: input.summary ?? '',
     };
+  }
+
+  private interpolateSystemPrompt(template: string, state: Record<string, string>): string {
+    return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key: string) => state[key] ?? '');
   }
 
   private async conversationSummary(conversationId: number): Promise<string | null> {
