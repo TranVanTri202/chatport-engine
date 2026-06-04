@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { LoadedDocument } from './file-loader.service';
 
 interface ParsedGoogleUrl {
@@ -11,7 +7,17 @@ interface ParsedGoogleUrl {
   gid?: string;
 }
 
+type GoogleLinkAccess =
+  | 'public'
+  | 'anyone_with_link'
+  | 'private'
+  | 'rate_limited'
+  | 'request_timeout'
+  | 'unknown_status'
+  | 'error_checking_access';
+
 const FETCH_TIMEOUT_MS = 20_000;
+const ACCESS_CHECK_TIMEOUT_MS = 5_000;
 const MAX_BYTES = 10 * 1024 * 1024;
 
 /**
@@ -39,6 +45,13 @@ export class GoogleDocsLoaderService {
 
   async load(url: string): Promise<LoadedDocument & { source: string }> {
     const parsed = this.parse(url);
+    const access = await this.checkAccess(url);
+    if (access !== 'public' && access !== 'anyone_with_link') {
+      throw new BadRequestException(
+        'Google Docs/Sheets link must be published or shared "anyone with the link" before importing.',
+      );
+    }
+
     const exportUrl = this.buildExportUrl(parsed);
     const text = await this.fetchText(exportUrl);
 
@@ -96,6 +109,57 @@ export class GoogleDocsLoaderService {
 
   private titleFromParsed(p: ParsedGoogleUrl): string {
     return p.kind === 'docs' ? `GDoc ${p.id}` : `GSheet ${p.id}/${p.gid ?? '0'}`;
+  }
+
+  private async checkAccess(url: string): Promise<GoogleLinkAccess> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), ACCESS_CHECK_TIMEOUT_MS);
+
+    const headers = {
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    };
+
+    try {
+      const res = await fetch(url, {
+        signal: controller.signal,
+        headers,
+        redirect: 'follow',
+      });
+
+      if (res.status === 429) return 'rate_limited';
+      if (res.status === 401 || res.status === 403) return 'private';
+
+      const text = await res.text();
+      const lower = `${this.extractTitle(text)}\n${text}`.toLowerCase();
+
+      const privateIndicators = [
+        'you need permission',
+        'bạn cần quyền truy cập',
+        'request access',
+        'yêu cầu quyền truy cập',
+        'access denied',
+        'quyền truy cập bị từ chối',
+        'sign in',
+        'đăng nhập',
+      ];
+
+      const looksPrivate = privateIndicators.some((indicator) => lower.includes(indicator));
+      if (looksPrivate) return 'private';
+
+      return 'public';
+    } catch (error) {
+      if ((error as Error).name === 'AbortError') return 'request_timeout';
+      return 'error_checking_access';
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  private extractTitle(html: string): string {
+    const match = html.match(/<title[^>]*>(.*?)<\/title>/is);
+    return match?.[1] ?? '';
   }
 
   private async fetchText(url: string): Promise<string> {
