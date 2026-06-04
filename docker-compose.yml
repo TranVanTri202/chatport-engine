@@ -58,7 +58,13 @@ services:
       - /app/node_modules
       - ./storage:/app/storage
     user: "0:0"
-    entrypoint: ["sh", "-c", "exec pnpm start:dev"]
+    entrypoint:
+      - sh
+      - -c
+      - |
+        pnpm prisma generate && \
+        pnpm prisma db push && \
+        exec pnpm start:dev
 
 volumes:
   pgdata:
