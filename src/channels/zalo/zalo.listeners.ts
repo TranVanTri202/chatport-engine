@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { BotStatus } from '@prisma/client';
 import { MessagingPublisher } from '@/messaging/messaging.publisher';
+import { PrismaService } from '@/shared/prisma/prisma.service';
 import { ZaloNormalizer, ZaloRawMessage } from './zalo.normalizer';
 import { ZaloInstanceRegistry } from './zalo-instance.registry';
 
@@ -19,6 +21,7 @@ export class ZaloListeners {
     private readonly normalizer: ZaloNormalizer,
     private readonly publisher: MessagingPublisher,
     private readonly instances: ZaloInstanceRegistry,
+    private readonly prisma: PrismaService,
   ) {}
 
   attach(api: unknown, bot: { id: number; externalId: string }): void {
@@ -53,6 +56,17 @@ export class ZaloListeners {
   /** Called from `attach` when zca-js emits `closed` with code 3003. */
   protected async handleClosed3003(botExternalId: string): Promise<void> {
     this.instances.delete(botExternalId);
+
+    await this.prisma.bot.updateMany({
+      where: {
+        channel: 'zalo',
+        externalId: botExternalId,
+      },
+      data: {
+        status: BotStatus.expired,
+      },
+    });
+
     this.logger.warn(`Zalo cookie expired for uid=${botExternalId}`);
   }
 }

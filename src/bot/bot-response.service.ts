@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { Bot } from '@prisma/client';
-import { ChannelType, ThreadType } from '@/shared/types';
+import { ChannelType, MessageType, ThreadType } from '@/shared/types';
 import { AppConfig } from '@/shared/config/app.config';
 import {
   DOMAIN_EVENTS,
@@ -120,6 +120,7 @@ export class BotResponseService {
       botExternalId: bot.externalId,
       threadId: conversation.threadExternalId,
       threadType: conversation.threadType as ThreadType,
+      type: MessageType.chat,
       text: reply,
     });
   }

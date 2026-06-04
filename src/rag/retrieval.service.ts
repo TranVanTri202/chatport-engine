@@ -28,8 +28,8 @@ export class RetrievalService {
     const rows = await this.prisma.$queryRaw<ChunkRow[]>`
       SELECT dc.id, dc.content, dc.embedding <=> ${literal}::vector AS distance
       FROM "DocumentChunk" dc
-      JOIN "BotDocument" bd ON bd."documentId" = dc."documentId"
-      WHERE bd."botId" = ${botId}
+      JOIN "Document" d ON d.id = dc."documentId"
+      WHERE d."botId" = ${botId}
       ORDER BY distance ASC
       LIMIT ${k}
     `;

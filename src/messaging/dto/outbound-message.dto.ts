@@ -1,4 +1,4 @@
-import { ChannelType, ThreadType } from '@/shared/types';
+import { ChannelType, MessageType, ThreadType } from '@/shared/types';
 import { OutboundAttachment } from '@/channels/channel-adapter.interface';
 
 /**
@@ -12,6 +12,7 @@ export class OutboundMessageDto {
   botExternalId!: string;
   threadId!: string;
   threadType!: ThreadType;
+  type!: MessageType;
   text?: string;
   attachments?: OutboundAttachment[];
   quote?: { messageExternalId: string };

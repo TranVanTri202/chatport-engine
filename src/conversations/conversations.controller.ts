@@ -7,11 +7,15 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { ConversationService } from './conversation.service';
+import {
+  ConversationListItem,
+  ConversationService,
+} from './conversation.service';
 import { MessageService } from './message.service';
 import {
   ListConversationsQuery,
   ListMessagesQuery,
+  ListParticipantsQuery,
 } from './dto/list-conversations.dto';
 
 @ApiTags('conversations')
@@ -24,11 +28,11 @@ export class ConversationsController {
   ) {}
 
   @Get()
-  list(
+  async list(
     @Param('channel') channel: string,
     @Param('externalId') externalId: string,
     @Query() query: ListConversationsQuery,
-  ) {
+  ): Promise<{ items: ConversationListItem[]; nextCursor: number | null }> {
     return this.conversations.listForBot({
       channel: channel as any,
       externalId,
@@ -40,6 +44,18 @@ export class ConversationsController {
   @Get(':id')
   detail(@Param('id', ParseIntPipe) id: number) {
     return this.conversations.getById(id);
+  }
+
+  @Get(':id/participants')
+  participants(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: ListParticipantsQuery,
+  ) {
+    return this.conversations.listParticipants({
+      conversationId: id,
+      limit: query.limit,
+      cursor: query.cursor,
+    });
   }
 
   @Get(':id/messages')

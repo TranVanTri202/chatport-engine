@@ -29,3 +29,19 @@ export class ListMessagesQuery {
   @IsOptional()
   cursor?: string;
 }
+
+export class ListParticipantsQuery {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
+
+  /** Cursor = last seen participant `id`. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  cursor?: number;
+}

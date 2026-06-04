@@ -30,7 +30,27 @@ export const envValidationSchema = Joi.object({
 
   SOCKET_CORS_ORIGIN: Joi.string().default('*'),
 
+  CONVERSATION_HISTORY_LIMIT: Joi.number().integer().min(1).default(40),
+  CONVERSATION_RECENT_LIMIT: Joi.number().integer().min(1).default(15),
+  CONVERSATION_SUMMARY_TRIGGER_LIMIT: Joi.number().integer().min(1).default(10),
+  CONVERSATION_SUMMARY_MAX_CHARS: Joi.number().integer().min(100).default(1200),
+
   LOG_LEVEL: Joi.string()
     .valid('fatal', 'error', 'warn', 'info', 'debug', 'trace')
     .default('info'),
-});
+})
+  .prefs({ abortEarly: false, allowUnknown: true })
+  .custom((value, helpers) => {
+    const hasServiceAccount = Boolean(value.FIREBASE_SERVICE_ACCOUNT_JSON);
+    const hasClientEmail = Boolean(value.FIREBASE_CLIENT_EMAIL);
+    const hasPrivateKey = Boolean(value.FIREBASE_PRIVATE_KEY);
+
+    if (hasServiceAccount || (hasClientEmail && hasPrivateKey)) {
+      return value;
+    }
+
+    return helpers.error('any.custom', {
+      message:
+        'Provide either FIREBASE_SERVICE_ACCOUNT_JSON or both FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY',
+    });
+  });

@@ -1,5 +1,5 @@
 import { ICommand } from '@nestjs/cqrs';
-import { ThreadType } from '@/shared/types';
+import { MessageType, ThreadType } from '@/shared/types';
 import { OutboundAttachment } from '@/channels/channel-adapter.interface';
 
 /**
@@ -14,9 +14,10 @@ import { OutboundAttachment } from '@/channels/channel-adapter.interface';
 export class SendMessageCommand implements ICommand {
   constructor(
     public readonly input: {
-      botId: number;
+      botExternalId: string;
       threadId: string;
       threadType: ThreadType;
+      type: MessageType;
       text?: string;
       attachments?: OutboundAttachment[];
       quote?: { messageExternalId: string };

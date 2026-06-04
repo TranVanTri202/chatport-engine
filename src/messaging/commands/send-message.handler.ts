@@ -1,8 +1,10 @@
-import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { NotFoundException } from '@nestjs/common';
+import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { PrismaService } from '@/shared/prisma/prisma.service';
-import { QuotaService } from '@/quota/quota.service';
+import { ChannelType } from '@/shared/types';
 import { MessagingPublisher } from '../messaging.publisher';
+import { OutboundMessageMapper } from '../outbound-message.mapper';
+import { SendMessageValidationService } from '../send-message-validation.service';
 import { SendMessageCommand } from './send-message.command';
 
 @CommandHandler(SendMessageCommand)
@@ -10,31 +12,26 @@ export class SendMessageHandler implements ICommandHandler<SendMessageCommand> {
   constructor(
     private readonly prisma: PrismaService,
     private readonly publisher: MessagingPublisher,
-    private readonly quota: QuotaService,
+    private readonly validator: SendMessageValidationService,
+    private readonly mapper: OutboundMessageMapper,
   ) {}
 
   async execute(cmd: SendMessageCommand): Promise<{ enqueued: true }> {
     const { input } = cmd;
-    const bot = await this.prisma.bot.findUnique({
-      where: { id: input.botId },
+    const bot = await this.prisma.bot.findFirst({
+      where: { externalId: input.botExternalId },
       select: { id: true, externalId: true, channel: true },
     });
-    if (!bot) throw new NotFoundException(`Bot ${input.botId} not found`);
+    if (!bot) throw new NotFoundException(`Bot ${input.botExternalId} not found`);
 
-    // Manual sends count toward the trial cap too. Throws → bubbles up as
-    // 402 Payment Required via GlobalExceptionFilter.
-    await this.quota.consumeRequest(bot.id);
+    this.validator.validate(input);
 
-    await this.publisher.publishOutbound({
-      botId: bot.id,
-      channel: bot.channel as unknown as import('@/shared/types').ChannelType,
-      botExternalId: bot.externalId,
-      threadId: input.threadId,
-      threadType: input.threadType,
-      text: input.text,
-      attachments: input.attachments,
-      quote: input.quote,
-    });
+    await this.publisher.publishOutbound(
+      this.mapper.fromSendCommand(
+        { id: bot.id, externalId: bot.externalId, channel: bot.channel as ChannelType },
+        input,
+      ),
+    );
     return { enqueued: true };
   }
 }

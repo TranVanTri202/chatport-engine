@@ -8,6 +8,11 @@ export enum ThreadType {
   group = 'group',
 }
 
+export enum MessageType {
+  chat = 'chat',
+  image = 'image',
+}
+
 export enum MessageDirection {
   in = 'in',
   out = 'out',

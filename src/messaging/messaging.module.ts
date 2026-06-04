@@ -16,6 +16,8 @@ import { InboundProcessor } from './inbound.processor';
 import { OutboundProcessor } from './outbound.processor';
 import { MessagesController } from './messages.controller';
 import { SendMessageHandler } from './commands/send-message.handler';
+import { SendMessageValidationService } from './send-message-validation.service';
+import { OutboundMessageMapper } from './outbound-message.mapper';
 
 @Module({
   imports: [
@@ -37,6 +39,8 @@ import { SendMessageHandler } from './commands/send-message.handler';
     InboundProcessor,
     OutboundProcessor,
     SendMessageHandler,
+    SendMessageValidationService,
+    OutboundMessageMapper,
   ],
   exports: [
     MessagingPublisher,

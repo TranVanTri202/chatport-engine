@@ -15,6 +15,16 @@ export type AttachmentType =
   | 'location'
   | 'link';
 
+export type MessageType =
+  | 'chat'
+  | 'image'
+  | 'video'
+  | 'file'
+  | 'voice'
+  | 'sticker'
+  | 'link'
+  | 'unknown';
+
 export interface InboundAttachment {
   type: AttachmentType;
   url?: string;
@@ -32,6 +42,7 @@ export interface InboundMessage {
   senderName?: string;
   messageExternalId: string;
   timestamp: number;
+  type: MessageType;
   text?: string;
   attachments: InboundAttachment[];
   quote?: { messageExternalId: string; text?: string };
@@ -48,6 +59,7 @@ export interface OutboundAttachment {
 export interface OutboundMessage {
   threadId: string;
   threadType: ThreadType;
+  type: MessageType;
   text?: string;
   attachments?: OutboundAttachment[];
   quote?: { messageExternalId: string };

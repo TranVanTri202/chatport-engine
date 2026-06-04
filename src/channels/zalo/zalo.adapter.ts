@@ -1,5 +1,4 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
 import { ChannelType, ThreadType } from '@/shared/types';
 import { ZaloQrStorageService } from './zalo-qr-storage.service';
 import {
@@ -40,7 +39,6 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
   }
 
   async startLogin(input: StartLoginInput): Promise<StartLoginResult> {
-    const sessionId = randomUUID();
     const { Zalo } = await import('zca-js');
     const zalo = new Zalo({ selfListen: false, checkUpdate: true, logging: true });
     this.qrStorage.ensureExists();
@@ -182,29 +180,64 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
     } | undefined;
 
     if (!api) throw new ChannelOfflineError(botExternalId);
-    if (!msg.text && !msg.attachments?.length) {
-      throw new ChannelSendError('Empty outbound message');
-    }
 
     const threadType = msg.threadType === ThreadType.group ? 1 : 0;
 
     try {
-      if (msg.text) {
-        await api.sendMessage?.({ msg: msg.text }, msg.threadId, threadType);
-      }
-      for (const attachment of msg.attachments ?? []) {
-        await api.sendMessage?.(
-          { msg: attachment.caption ?? '', attachments: [{ data: attachment.url }] },
-          msg.threadId,
-          threadType,
-        );
-      }
+      await this.sendByType(api, msg, threadType);
       return { messageExternalId: null, sentAt: Date.now() };
     } catch (error) {
-      throw new ChannelSendError(
-        `Failed to send Zalo message: ${(error as Error).message}`,
-      );
+      if (error instanceof ChannelSendError) throw error;
+      throw new ChannelSendError(`Failed to send Zalo message: ${(error as Error).message}`);
     }
+  }
+
+  private async sendByType(
+    api: { sendMessage?: (payload: Record<string, unknown>, threadId: string, type: number) => Promise<unknown> },
+    msg: OutboundMessage,
+    threadType: number,
+  ): Promise<void> {
+    switch (msg.type) {
+      case 'chat':
+        return this.sendText(api, msg.threadId, threadType, msg.text);
+      case 'image':
+        return this.sendImage(api, msg.threadId, threadType, msg.text, msg.attachments);
+      default:
+        throw new ChannelSendError(`Unsupported outbound message type: ${msg.type}`);
+    }
+  }
+
+  private async sendText(
+    api: { sendMessage?: (payload: Record<string, unknown>, threadId: string, type: number) => Promise<unknown> },
+    threadId: string,
+    threadType: number,
+    text?: string,
+  ): Promise<void> {
+    if (!text?.trim()) {
+      throw new ChannelSendError('Text is required for chat messages');
+    }
+    await api.sendMessage?.({ msg: text }, threadId, threadType);
+  }
+
+  private async sendImage(
+    api: { sendMessage?: (payload: Record<string, unknown>, threadId: string, type: number) => Promise<unknown> },
+    threadId: string,
+    threadType: number,
+    text: string | undefined,
+    attachments?: Array<{ url: string; caption?: string }>,
+  ): Promise<void> {
+    if (!attachments?.length) {
+      throw new ChannelSendError('Image attachment is required for image messages');
+    }
+    const [first] = attachments;
+    await api.sendMessage?.(
+      {
+        msg: first.caption ?? text ?? '',
+        attachments: [{ data: first.url }],
+      },
+      threadId,
+      threadType,
+    );
   }
 
   async status(botExternalId: string): Promise<ChannelStatus> {

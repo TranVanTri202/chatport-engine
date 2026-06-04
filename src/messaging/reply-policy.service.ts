@@ -20,10 +20,11 @@ export class ReplyPolicyService {
     // Bot never replies to itself.
     if (inbound.isSelf) return false;
 
-    // Text-only policy — no vision/audio available.
+    // Only plain chat messages trigger bot replies.
+    if (inbound.type !== 'chat') return false;
+
     const text = inbound.text?.trim();
     if (!text) return false;
-    if (inbound.attachments && inbound.attachments.length > 0) return false;
 
     // Group thread: require mention OR explicit alwaysReply flag.
     if (conversation.threadType === ThreadType.group) {

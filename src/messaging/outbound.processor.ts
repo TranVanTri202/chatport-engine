@@ -61,6 +61,7 @@ export class OutboundProcessor extends WorkerHost {
         sendResult = await adapter.send(msg.botExternalId, {
           threadId: msg.threadId,
           threadType: msg.threadType,
+          type: msg.type,
           text: msg.text,
           attachments: msg.attachments,
           quote: msg.quote,

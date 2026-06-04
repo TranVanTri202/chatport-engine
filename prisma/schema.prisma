@@ -26,6 +26,17 @@ enum MessageDirection {
   out
 }
 
+enum MessageType {
+  chat
+  image
+  video
+  file
+  voice
+  sticker
+  link
+  unknown
+}
+
 enum BotStatus {
   active
   inactive
@@ -97,6 +108,7 @@ model Conversation {
   threadType             ThreadType
   threadExternalId       String
   title                  String?
+  avatar                 String?
   unread                 Int           @default(0)
   lastMessageAt          DateTime?
   lastMessageText        String?       @db.Text
@@ -129,6 +141,7 @@ model Message {
   id                BigInt           @id @default(autoincrement())
   conversationId    Int
   direction         MessageDirection
+  type              MessageType      @default(chat)
   senderExternalId  String?
   messageExternalId String?
   text              String?          @db.Text

@@ -72,15 +72,44 @@ export class TelegramAdapter implements IChannelAdapter, OnModuleInit {
     if (!bot) throw new ChannelOfflineError(botExternalId);
 
     try {
-      if (msg.text) {
-        await bot.telegram.sendMessage(msg.threadId, msg.text);
-      }
+      await this.sendByType(bot, msg);
       return { messageExternalId: null, sentAt: Date.now() };
     } catch (error) {
-      throw new ChannelSendError(
-        `Failed to send Telegram message: ${(error as Error).message}`,
-      );
+      if (error instanceof ChannelSendError) throw error;
+      throw new ChannelSendError(`Failed to send Telegram message: ${(error as Error).message}`);
     }
+  }
+
+  private async sendByType(bot: any, msg: OutboundMessage): Promise<void> {
+    switch (msg.type) {
+      case 'chat':
+        return this.sendText(bot, msg.threadId, msg.text);
+      case 'image':
+        return this.sendImage(bot, msg.threadId, msg.text, msg.attachments);
+      default:
+        throw new ChannelSendError(`Unsupported outbound message type: ${msg.type}`);
+    }
+  }
+
+  private async sendText(bot: any, threadId: string, text?: string): Promise<void> {
+    if (!text?.trim()) {
+      throw new ChannelSendError('Text is required for chat messages');
+    }
+    await bot.telegram.sendMessage(threadId, text);
+  }
+
+  private async sendImage(
+    bot: any,
+    threadId: string,
+    text: string | undefined,
+    attachments?: Array<{ url: string; caption?: string }>,
+  ): Promise<void> {
+    if (!attachments?.length) {
+      throw new ChannelSendError('Image attachment is required for image messages');
+    }
+
+    const [first] = attachments;
+    await bot.telegram.sendPhoto(threadId, first.url, { caption: first.caption ?? text ?? '' });
   }
 
   async status(botExternalId: string): Promise<ChannelStatus> {

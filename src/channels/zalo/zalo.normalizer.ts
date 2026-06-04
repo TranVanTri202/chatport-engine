@@ -3,6 +3,7 @@ import { ChannelType, ThreadType } from '@/shared/types';
 import {
   InboundAttachment,
   InboundMessage,
+  MessageType,
 } from '../channel-adapter.interface';
 
 /**
@@ -51,6 +52,7 @@ export class ZaloNormalizer {
       senderName: payload.dName ?? raw.senderName,
       messageExternalId: String(payload.msgId ?? raw.msgId ?? ''),
       timestamp: Number(payload.ts ?? raw.ts ?? Date.now()),
+      type: this.resolveMessageType(attachments),
       text,
       attachments,
       quote: quote
@@ -60,6 +62,14 @@ export class ZaloNormalizer {
       isSelf: senderExternalId === botExternalId,
       raw,
     };
+  }
+
+  private resolveMessageType(attachments: InboundAttachment[]): MessageType {
+    if (attachments.length === 0) return 'chat';
+    const type = attachments[0]!.type;
+    return type === 'image' || type === 'video' || type === 'file' || type === 'voice' || type === 'sticker' || type === 'link'
+      ? type
+      : 'unknown';
   }
 
   private extractContent(input: {

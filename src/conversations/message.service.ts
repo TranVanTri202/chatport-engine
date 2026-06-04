@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Message, Prisma } from '@prisma/client';
+import { Message, MessageType, Prisma } from '@prisma/client';
 import { PrismaService } from '@/shared/prisma/prisma.service';
 import { MessageDirection } from '@/shared/types';
 import {
@@ -36,6 +36,7 @@ export class MessageService {
         direction,
         senderExternalId: msg.senderExternalId,
         messageExternalId: msg.messageExternalId,
+        type: this.resolveMessageType(msg),
         text: msg.text,
         attachments: msg.attachments as unknown as Prisma.InputJsonValue,
         quoteOfExternalId: msg.quote?.messageExternalId,
@@ -62,6 +63,18 @@ export class MessageService {
         attachments: input.attachments as unknown as Prisma.InputJsonValue,
       },
     });
+  }
+
+  private resolveMessageType(msg: InboundMessageDto): MessageType {
+    if (msg.attachments.length === 0) return 'chat';
+    const types = new Set(msg.attachments.map((a) => a.type));
+    if (types.has('image')) return 'image';
+    if (types.has('video')) return 'video';
+    if (types.has('file')) return 'file';
+    if (types.has('voice')) return 'voice';
+    if (types.has('sticker')) return 'sticker';
+    if (types.has('link')) return 'link';
+    return 'unknown';
   }
 
   /** Most-recent N messages, returned in chronological order for LLM history. */
