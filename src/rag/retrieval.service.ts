@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/shared/prisma/prisma.service';
 import { EmbeddingService } from './embedding.service';
+import { DocumentChunkRepository } from './repositories/document-chunk.repository';
 
 export interface RetrievedChunk {
   id: string; // bigint as string
@@ -8,31 +8,18 @@ export interface RetrievedChunk {
   score: number; // 1 - cosine distance
 }
 
-interface ChunkRow {
-  id: bigint;
-  content: string;
-  distance: number;
-}
-
 @Injectable()
 export class RetrievalService {
   constructor(
-    private readonly prisma: PrismaService,
     private readonly embeddings: EmbeddingService,
+    private readonly chunkRepo: DocumentChunkRepository,
   ) {}
 
   async search(botId: number, query: string, k = 5): Promise<RetrievedChunk[]> {
     const vec = await this.embeddings.embedQuery(query);
     const literal = `[${vec.join(',')}]`;
 
-    const rows = await this.prisma.$queryRaw<ChunkRow[]>`
-      SELECT dc.id, dc.content, dc.embedding <=> ${literal}::vector AS distance
-      FROM "DocumentChunk" dc
-      JOIN "Document" d ON d.id = dc."documentId"
-      WHERE d."botId" = ${botId}
-      ORDER BY distance ASC
-      LIMIT ${k}
-    `;
+    const rows = await this.chunkRepo.searchSimilarity(botId, literal, k);
 
     return rows.map((r) => ({
       id: r.id.toString(),

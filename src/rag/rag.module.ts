@@ -12,6 +12,7 @@ import { DocumentLoaderService } from './loaders/document-loader.service';
 import { FileLoaderService } from './loaders/file-loader.service';
 import { GoogleDocsLoaderService } from './loaders/google-docs-loader.service';
 import { DocumentRepository } from './repositories/document.repository';
+import { DocumentChunkRepository } from './repositories/document-chunk.repository';
 
 @Module({
   imports: [BullModule.registerQueue({ name: RAG_EMBED_QUEUE }), forwardRef(() => BotModule)],
@@ -21,12 +22,13 @@ import { DocumentRepository } from './repositories/document.repository';
     EmbeddingService,
     DocumentService,
     DocumentRepository,
+    DocumentChunkRepository,
     EmbedProcessor,
     RetrievalService,
     FileLoaderService,
     GoogleDocsLoaderService,
     DocumentLoaderService,
   ],
-  exports: [EmbeddingService, RetrievalService, DocumentService],
+  exports: [EmbeddingService, RetrievalService, DocumentService, DocumentRepository, DocumentChunkRepository],
 })
 export class RagModule {}

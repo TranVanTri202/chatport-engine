@@ -2,7 +2,6 @@ import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Job } from 'bullmq';
-import { PrismaService } from '@/shared/prisma/prisma.service';
 import { RAG_EMBED_QUEUE } from '@/shared/types';
 import {
   DOMAIN_EVENTS,
@@ -11,13 +10,16 @@ import {
 import { ChunkerService } from './chunker.service';
 import { EmbeddingService } from './embedding.service';
 import { EmbedDocumentJob } from './document.service';
+import { DocumentRepository } from './repositories/document.repository';
+import { DocumentChunkRepository } from './repositories/document-chunk.repository';
 
 @Processor(RAG_EMBED_QUEUE, { concurrency: 2 })
 export class EmbedProcessor extends WorkerHost {
   private readonly logger = new Logger(EmbedProcessor.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly docRepo: DocumentRepository,
+    private readonly chunkRepo: DocumentChunkRepository,
     private readonly chunker: ChunkerService,
     private readonly embeddings: EmbeddingService,
     private readonly events: EventEmitter2,
@@ -27,9 +29,7 @@ export class EmbedProcessor extends WorkerHost {
 
   async process(job: Job<EmbedDocumentJob>): Promise<void> {
     const { documentId } = job.data;
-    const doc = await this.prisma.document.findUnique({
-      where: { id: documentId },
-    });
+    const doc = await this.docRepo.findById(documentId);
     if (!doc) {
       this.logger.warn(`Document ${documentId} missing — skipping embed job`);
       return;
@@ -37,7 +37,7 @@ export class EmbedProcessor extends WorkerHost {
 
     const from = doc.status;
     try {
-      await this.prisma.documentChunk.deleteMany({ where: { documentId } });
+      await this.chunkRepo.deleteManyByDocument(documentId);
 
       const chunks = await this.chunker.chunk(doc.rawText);
       if (chunks.length > 0) {
@@ -48,27 +48,24 @@ export class EmbedProcessor extends WorkerHost {
           const c = chunks[i]!;
           const vec = vectors[i]!;
           const literal = `[${vec.join(',')}]`;
-          await this.prisma.$executeRaw`
-            INSERT INTO "DocumentChunk" ("documentId","ordinal","content","tokenCount","embedding")
-            VALUES (${documentId}, ${c.ordinal}, ${c.content}, ${c.tokenCount}, ${literal}::vector)
-          `;
+          await this.chunkRepo.insertChunk({
+            documentId,
+            ordinal: c.ordinal,
+            content: c.content,
+            tokenCount: c.tokenCount,
+            embeddingLiteral: literal,
+          });
         }
       }
 
-      const updated = await this.prisma.document.update({
-        where: { id: documentId },
-        data: { status: 'embedded' },
-      });
+      const updated = await this.docRepo.update(documentId, { status: 'embedded' });
       this.events.emit(DOMAIN_EVENTS.DocumentStatusChanged, {
         document: updated,
         from,
         to: 'embedded',
       } satisfies DocumentStatusChangedEvent);
     } catch (err) {
-      const updated = await this.prisma.document.update({
-        where: { id: documentId },
-        data: { status: 'failed' },
-      });
+      const updated = await this.docRepo.update(documentId, { status: 'failed' });
       this.events.emit(DOMAIN_EVENTS.DocumentStatusChanged, {
         document: updated,
         from,
