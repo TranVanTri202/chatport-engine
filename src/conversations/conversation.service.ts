@@ -166,6 +166,18 @@ export class ConversationService {
     });
   }
 
+  async getOrCreateBySession(input: {
+    botId: number;
+    sessionId: string;
+    threadType?: ThreadType;
+  }): Promise<Conversation> {
+    return this.getOrCreate({
+      botId: input.botId,
+      threadType: input.threadType ?? ThreadType.user,
+      threadExternalId: input.sessionId,
+    });
+  }
+
   // ── Read API for the FE conversation list ────────────────────────
 
   /**

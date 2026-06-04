@@ -9,6 +9,8 @@ import { ConversationsModule } from '@/conversations/conversations.module';
 import { RealtimeModule } from '@/realtime/realtime.module';
 import { BotModule } from '@/bot/bot.module';
 import { QuotaModule } from '@/quota/quota.module';
+import { RagModule } from '@/rag/rag.module';
+import { LlmModule } from '@/llm/llm.module';
 import { MessagingPublisher } from './messaging.publisher';
 import { MessageHandler } from './message.handler';
 import { ReplyPolicyService } from './reply-policy.service';
@@ -30,6 +32,8 @@ import { OutboundMessageMapper } from './outbound-message.mapper';
     RealtimeModule,
     forwardRef(() => BotModule),
     QuotaModule,
+    forwardRef(() => RagModule),
+    LlmModule,
   ],
   controllers: [MessagesController],
   providers: [

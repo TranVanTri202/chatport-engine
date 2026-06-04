@@ -29,4 +29,10 @@ export class AuthController {
     const profile = await this.firebaseAuth.verifyIdToken(body.idToken, body.provider);
     return this.authService.loginWithFirebase(profile);
   }
+
+  @Public()
+  @Post('login/demo')
+  async demoLogin() {
+    return this.authService.loginDemo();
+  }
 }
