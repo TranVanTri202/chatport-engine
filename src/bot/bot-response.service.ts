@@ -48,14 +48,20 @@ export class BotResponseService {
     if (bot.status !== 'active') return;
     if (!this.policy.shouldConsider({ bot, conversation, inbound })) return;
 
-    const systemPrompt = bot.systemPrompt?.trim();
-    if (!systemPrompt) return;
-
-    // Quota gate — fail fast before doing any LLM/RAG work. Quota exhaustion
-    // on the auto-reply path is a silent skip (we still persisted the
-    // inbound message), so the user just won't get a bot answer.
     try {
-      await this.quota.consumeRequest(bot.id);
+      const userText = inbound.text!.trim();
+      const result = await this.generateReply(bot, conversation, userText);
+      if (!result) return;
+
+      await this.publisher.publishOutbound({
+        botId: bot.id,
+        channel: bot.channel as ChannelType,
+        botExternalId: bot.externalId,
+        threadId: conversation.threadExternalId,
+        threadType: conversation.threadType as ThreadType,
+        type: MessageType.chat,
+        text: result.reply,
+      });
     } catch (err) {
       if (err instanceof QuotaExceededError) {
         this.logger.warn(
@@ -65,8 +71,24 @@ export class BotResponseService {
       }
       throw err;
     }
+  }
 
-    const userText = inbound.text!.trim();
+  /**
+   * Public helper to run the standardized RAG context lookup, rolling summary
+   * updates, system prompt template interpolation, and LLM chat call.
+   * Shared between the production auto-reply listener and the demo chat endpoint.
+   */
+  async generateReply(
+    bot: Bot,
+    conversation: { id: number; name?: string | null },
+    userText: string,
+  ): Promise<{ reply: string; contexts: any[] } | null> {
+    const systemPrompt = bot.systemPrompt?.trim();
+    if (!systemPrompt) return null;
+
+    // Quota check — can throw QuotaExceededError
+    await this.quota.consumeRequest(bot.id);
+
     const topK = bot.ragTopK ?? this.config.ragTopKDefault;
     const contexts = await this.retrieval.search(bot.id, userText, topK);
 
@@ -112,17 +134,10 @@ export class BotResponseService {
       messages,
       overrides: this.botOverrides(bot),
     });
-    if (!reply) return;
 
-    await this.publisher.publishOutbound({
-      botId: bot.id,
-      channel: bot.channel as ChannelType,
-      botExternalId: bot.externalId,
-      threadId: conversation.threadExternalId,
-      threadType: conversation.threadType as ThreadType,
-      type: MessageType.chat,
-      text: reply,
-    });
+    if (!reply) return null;
+
+    return { reply, contexts };
   }
 
   private buildConversationState(input: {

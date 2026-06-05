@@ -1,6 +1,7 @@
 export enum ChannelType {
   zalo = 'zalo',
   telegram = 'telegram',
+  demo = 'demo',
 }
 
 export enum ThreadType {

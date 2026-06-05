@@ -97,13 +97,13 @@ export class AuthService {
       (await this.prisma.bot.findFirst({
         where: {
           customerId: customer.id,
-          channel: ChannelType.zalo,
+          channel: ChannelType.demo,
         },
       })) ??
       (await this.prisma.bot.create({
         data: {
           customerId: customer.id,
-          channel: ChannelType.zalo,
+          channel: ChannelType.demo,
           externalId: randomUUID(),
           name: 'Demo Bot',
           status: BotStatus.active,

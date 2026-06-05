@@ -14,6 +14,7 @@ import { MessageService } from '@/conversations/message.service';
 import { RetrievalService } from '@/rag/retrieval.service';
 import { LlmService } from '@/llm/llm.service';
 import { AppConfig } from '@/shared/config/app.config';
+import { BotResponseService } from '@/bot/bot-response.service';
 
 class DemoChatDto {
   @IsString()
@@ -42,6 +43,7 @@ export class MessagesController {
     private readonly retrieval: RetrievalService,
     private readonly llm: LlmService,
     private readonly config: AppConfig,
+    private readonly botResponse: BotResponseService,
   ) {}
 
   @Post('send/text')
@@ -60,19 +62,15 @@ export class MessagesController {
 
   @Post('demo/chat')
   async demoChat(@Body() body: DemoChatDto) {
-    const bot = await this.bots.getByExternal(ChannelType.zalo, body.botExternalId);
-    const conversation = await this.conversations.getOrCreateBySession({
-      botId: bot.id,
-      sessionId: body.sessionId,
-      threadType: body.threadType ?? ThreadType.user,
-    });
+    const bot = await this.bots.getByExternal(ChannelType.demo, body.botExternalId);
 
     const inbound: InboundMessageDto = {
-      channel: ChannelType.zalo,
+      channel: ChannelType.demo,
       botExternalId: body.botExternalId,
       threadId: body.sessionId,
       threadType: body.threadType ?? ThreadType.user,
       senderExternalId: body.sessionId,
+      senderName: 'Demo User',
       messageExternalId: `demo-${Date.now()}`,
       timestamp: Date.now(),
       type: 'chat',
@@ -81,39 +79,23 @@ export class MessagesController {
       isSelf: false,
     };
 
+    const { conversation } = await this.conversations.upsertFromInbound(inbound);
+
     await this.messages.persistInbound({
       conversationId: conversation.id,
       direction: MessageDirection.in,
       msg: inbound,
     });
 
-    const systemPrompt = bot.systemPrompt?.trim();
-    if (!systemPrompt) {
-      throw new BadRequestException('Bot system prompt is required');
+    const result = await this.botResponse.generateReply(bot, conversation, body.text);
+    if (!result) {
+      throw new BadRequestException('Could not generate bot reply');
     }
-
-    const history = await this.messages.lastN(conversation.id, this.config.conversationHistoryLimit);
-    const contexts = await this.retrieval.search(bot.id, body.text, bot.ragTopK ?? this.config.ragTopKDefault);
-    const reply = await this.llm.chat({
-      system: systemPrompt,
-      messages: history.map((m) => ({
-        role: m.direction === 'out' ? 'assistant' : 'user',
-        content: m.text ?? '',
-      })),
-      overrides: {
-        model: bot.llmModel ?? undefined,
-        temperature: bot.temperature ?? undefined,
-        maxTokens: bot.maxTokens ?? undefined,
-        topP: bot.topP ?? undefined,
-        frequencyPenalty: bot.frequencyPenalty ?? undefined,
-        presencePenalty: bot.presencePenalty ?? undefined,
-      },
-    });
 
     const outbound = await this.messages.persistOutbound({
       conversationId: conversation.id,
       direction: MessageDirection.out,
-      text: reply,
+      text: result.reply,
       attachments: [],
       messageExternalId: null,
       senderExternalId: bot.externalId,
@@ -122,8 +104,8 @@ export class MessagesController {
     return {
       bot,
       conversation,
-      reply,
-      documents: contexts,
+      reply: result.reply,
+      documents: result.contexts,
       message: outbound,
     };
   }
