@@ -2,6 +2,7 @@ import { Body, Controller, Param, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentCustomer } from '@/shared/decorators/current-customer.decorator';
 import { TelegramAdapter } from './telegram.adapter';
+import { RegisterTelegramBotDto } from './dto/register-bot.dto';
 
 @ApiTags('channels')
 @ApiBearerAuth('jwt')
@@ -18,7 +19,7 @@ export class TelegramController {
   async registerBot(
     @Param('botId') botId: string,
     @CurrentCustomer() customerId: number,
-    @Body() body: { token: string; webhookUrl?: string },
+    @Body() body: RegisterTelegramBotDto,
   ) {
     void customerId;
     await this.adapter.registerBot(Number(botId), body.token, body.webhookUrl);

@@ -1,4 +1,5 @@
 import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { OmitType } from '@nestjs/swagger';
 
 export class IngestDocumentDto {
   /** Server-injected from route or bot context — not validated as input. */
@@ -21,3 +22,8 @@ export class IngestDocumentDto {
   @IsString()
   mimeType?: string;
 }
+
+export class IngestDocumentBodyDto extends OmitType(IngestDocumentDto, [
+  'channel',
+  'externalId',
+] as const) {}

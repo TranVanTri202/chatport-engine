@@ -2,6 +2,8 @@ import { Type } from 'class-transformer';
 import {
   IsEnum,
   IsInt,
+  IsNotEmpty,
+  IsNumber,
   IsObject,
   IsOptional,
   IsPositive,
@@ -11,6 +13,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { OmitType } from '@nestjs/swagger';
 import { ChannelType } from '@/shared/types';
 
 /**
@@ -114,4 +117,23 @@ export class UpdateBotDto {
   @ValidateNested()
   @Type(() => BotSettingsDto)
   settings?: BotSettingsDto;
+}
+
+export class CreateBotBodyDto extends OmitType(CreateBotDto, [
+  'customerId',
+] as const) {}
+
+export class UpdateTemperatureDto {
+  @IsNotEmpty()
+  @IsNumber()
+  @Min(0)
+  @Max(2)
+  temperature!: number;
+}
+
+export class UpdateSystemPromptDto {
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(20000)
+  systemPrompt!: string;
 }

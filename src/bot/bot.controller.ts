@@ -11,7 +11,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentCustomer } from '@/shared/decorators/current-customer.decorator';
 import { ChannelType } from '@/shared/types';
 import { BotService } from './bot.service';
-import { CreateBotDto, UpdateBotDto } from './dto/create-bot.dto';
+import { CreateBotDto, UpdateBotDto, CreateBotBodyDto, UpdateTemperatureDto, UpdateSystemPromptDto } from './dto/create-bot.dto';
 
 @ApiTags('bots')
 @ApiBearerAuth('jwt')
@@ -35,7 +35,7 @@ export class BotController {
   @Post()
   create(
     @CurrentCustomer() customerId: number,
-    @Body() body: Omit<CreateBotDto, 'customerId'>,
+    @Body() body: CreateBotBodyDto,
   ) {
     return this.bots.create({ ...body, customerId } as CreateBotDto);
   }
@@ -61,7 +61,7 @@ export class BotController {
   updateTemperature(
     @Param('channel') channel: ChannelType,
     @Param('externalId') externalId: string,
-    @Body() body: { temperature: number },
+    @Body() body: UpdateTemperatureDto,
   ) {
     return this.bots.getByExternal(channel, externalId).then((bot) => this.bots.update(bot.id, { temperature: body.temperature }));
   }
@@ -88,7 +88,7 @@ export class BotController {
   updateSystemPrompt(
     @Param('channel') channel: ChannelType,
     @Param('externalId') externalId: string,
-    @Body() body: { systemPrompt: string },
+    @Body() body: UpdateSystemPromptDto,
   ) {
     return this.bots.updateSystemPrompt(channel, externalId, body.systemPrompt);
   }

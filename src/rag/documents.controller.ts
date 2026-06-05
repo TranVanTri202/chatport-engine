@@ -19,8 +19,8 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { DocumentService } from './document.service';
-import { IngestDocumentDto } from './dto/ingest-document.dto';
-import { ImportUrlDto, UploadDocumentMetaDto } from './dto/import-url.dto';
+import { IngestDocumentDto, IngestDocumentBodyDto } from './dto/ingest-document.dto';
+import { ImportUrlDto, UploadDocumentMetaDto, ImportUrlBodyDto, UploadDocumentMetaBodyDto } from './dto/import-url.dto';
 import { ChannelType } from '@/shared/types';
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
@@ -43,7 +43,7 @@ export class DocumentsController {
   ingest(
     @Param('channel') channel: ChannelType,
     @Param('externalId') externalId: string,
-    @Body() body: Omit<IngestDocumentDto, 'channel' | 'externalId'>,
+    @Body() body: IngestDocumentBodyDto,
   ) {
     return this.documents.ingest({ ...body, channel, externalId } as IngestDocumentDto);
   }
@@ -66,7 +66,7 @@ export class DocumentsController {
   upload(
     @Param('channel') channel: ChannelType,
     @Param('externalId') externalId: string,
-    @Body() body: Omit<UploadDocumentMetaDto, 'channel' | 'externalId'>,
+    @Body() body: UploadDocumentMetaBodyDto,
     @UploadedFile(
       new ParseFilePipeBuilder()
         .addMaxSizeValidator({ maxSize: MAX_UPLOAD_BYTES })
@@ -91,7 +91,7 @@ export class DocumentsController {
   importUrl(
     @Param('channel') channel: ChannelType,
     @Param('externalId') externalId: string,
-    @Body() body: Omit<ImportUrlDto, 'channel' | 'externalId'>,
+    @Body() body: ImportUrlBodyDto,
   ) {
     return this.documents.ingestFromUrl({
       channel,
