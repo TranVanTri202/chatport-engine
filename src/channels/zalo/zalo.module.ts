@@ -22,7 +22,7 @@ import { ZaloZcaService } from './zalo-zca.service';
     ZaloQrStorageService,
     ZaloZcaService,
   ],
-  exports: [ZaloAdapter, ZaloZcaService],
+  exports: [ZaloAdapter, ZaloZcaService, ZaloNormalizer],
 })
 export class ZaloModule implements OnApplicationBootstrap {
   private readonly logger = new Logger(ZaloModule.name);

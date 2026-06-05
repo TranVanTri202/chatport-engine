@@ -1,0 +1,75 @@
+# =========================================================================
+# DEPENDENCIES (Thư mục cài đặt thư viện - KHÔNG ĐẨY LÊN GIT)
+# =========================================================================
+node_modules
+/dist
+/build
+
+# pnpm specific
+.pnpm-store
+store.lock
+# Nếu dùng pnpm workspace
+.modules.yaml
+
+# =========================================================================
+# ENVIRONMENT VARIABLES & SECRETS (Bảo mật - Nơi chứa Token Zalo, DB Key...)
+# =========================================================================
+.env
+.env.local
+.env.production
+.env.development
+.env.test
+*.env
+!.env.example # Giữ lại file example để làm mẫu cấu hình cho người khác
+
+# Supabase & Firebase secrets (nếu có)
+.supabase/functions/.env
+apiKey.json
+serviceAccountKey.json
+
+# =========================================================================
+# LOGS & TEMPORARY FILES
+# =========================================================================
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# NestJS / TypeScript infrastructure
+.local
+.nest
+.swc
+tsconfig.tsbuildinfo
+
+# =========================================================================
+# IDEs & EDITORS (Cấu hình riêng của VS Code, WebStorm...)
+# =========================================================================
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+
+# =========================================================================
+# TESTING & COVERAGE
+# =========================================================================
+/coverage
+.nyc_output
+
+# =========================================================================
+# PRISMA / DATABASE SPECIFIC (Nếu dùng Prisma/TypeORM)
+# =========================================================================
+# Nếu bạn muốn ignore các file sqlite cục bộ
+/*.db
+/*.db-journal

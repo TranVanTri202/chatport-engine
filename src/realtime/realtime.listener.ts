@@ -4,6 +4,7 @@ import {
   BotStatusChangedEvent,
   DOMAIN_EVENTS,
   DocumentStatusChangedEvent,
+  MessageReactedEvent,
   MessageReceivedEvent,
   MessageSentEvent,
 } from '@/shared/events/domain-events';
@@ -60,6 +61,15 @@ export class RealtimeListener {
       from: e.from,
       to: e.to,
       error: e.error,
+    });
+  }
+
+  @OnEvent(DOMAIN_EVENTS.MessageReacted)
+  onReacted(e: MessageReactedEvent): void {
+    this.gateway.emitToCustomer(e.customerId, 'message:reaction', {
+      conversationId: e.conversationId,
+      messageExternalId: e.messageExternalId,
+      reactions: e.reactions,
     });
   }
 }

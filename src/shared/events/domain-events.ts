@@ -28,6 +28,9 @@ export const DOMAIN_EVENTS = {
 
   /** Document RAG status transition (pending → embedded | failed). */
   DocumentStatusChanged: 'document.status.changed',
+
+  /** Message reaction added/updated. */
+  MessageReacted: 'message.reacted',
 } as const;
 
 export interface MessageReceivedEvent {
@@ -58,4 +61,11 @@ export interface DocumentStatusChangedEvent {
   from: string;
   to: string;
   error?: string;
+}
+
+export interface MessageReactedEvent {
+  customerId: number;
+  conversationId: number;
+  messageExternalId: string;
+  reactions: Array<{ userId: string; userName: string; reaction: string }>;
 }

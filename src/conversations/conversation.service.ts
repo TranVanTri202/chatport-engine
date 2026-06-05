@@ -77,12 +77,22 @@ export class ConversationService {
 
     let convoTitle: string | null = null;
     let convoAvatar: string | null = null;
+    let memberCount: number | undefined = undefined;
 
     if (msg.threadType === 'user') {
       // In direct chat, the conversation belongs to the other person (threadId)
       const otherProfile = await this.resolveUserProfile(msg.channel, msg.botExternalId, msg.threadId);
       convoTitle = otherProfile?.displayName ?? (msg.isSelf ? null : msg.senderName) ?? null;
       convoAvatar = otherProfile?.avatar ?? null;
+    } else if (msg.threadType === 'group') {
+      if (msg.channel === ChannelType.zalo) {
+        const groupInfo = await this.zaloZcaService.getGroupInfo(msg.botExternalId, msg.threadId);
+        if (groupInfo) {
+          convoTitle = groupInfo.name;
+          convoAvatar = groupInfo.avt;
+          memberCount = groupInfo.totalMember;
+        }
+      }
     }
 
     const conversation = await this.repo.upsertConversationFromInbound({
@@ -97,6 +107,7 @@ export class ConversationService {
       senderName: lastMessageSenderName,
       senderAvatar: lastMessageSenderAvatar,
       isSelf: msg.isSelf,
+      memberCount,
     });
 
     await this.repo.upsertParticipant({

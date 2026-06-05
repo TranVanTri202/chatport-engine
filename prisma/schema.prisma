@@ -155,6 +155,7 @@ model Message {
   messageExternalId String?
   text              String?          @db.Text
   attachments       Json             @default("[]")
+  reactions         Json             @default("[]")
   quoteOfExternalId String?
   raw               Json?
   createdAt         DateTime         @default(now())

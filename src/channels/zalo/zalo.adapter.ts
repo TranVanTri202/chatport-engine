@@ -135,6 +135,7 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
 
       // Sync friends list in the background
       void this.syncFriends(bot.id, botExternalId);
+      void this.syncGroups(bot.id, botExternalId);
 
       return {
         sessionId: String(bot.id),
@@ -163,6 +164,7 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
 
     // Sync friends list in the background
     void this.syncFriends(botId, botExternalId);
+    void this.syncGroups(botId, botExternalId);
   }
 
   async syncFriends(botId: number, botExternalId: string): Promise<void> {
@@ -237,6 +239,58 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
       this.logger.log(`Successfully synced friend requests for botId=${botId}`);
     } catch (error) {
       this.logger.error(`Failed to sync friends/requests for botId=${botId}: ${(error as Error).message}`);
+    }
+  }
+
+  async syncGroups(botId: number, botExternalId: string): Promise<void> {
+    try {
+      this.logger.log(`Syncing groups list for botId=${botId} (${botExternalId})`);
+      const groupIds = await this.zca.getAllGroups(botExternalId);
+      this.logger.log(`Found ${groupIds.length} groups for botId=${botId}`);
+      for (const groupId of groupIds) {
+        const groupInfo = await this.zca.getGroupInfo(botExternalId, groupId);
+        if (groupInfo) {
+          // Find or create conversation
+          const conversation = await this.prisma.conversation.upsert({
+            where: {
+              botId_threadExternalId: {
+                botId,
+                threadExternalId: groupId,
+              },
+            },
+            create: {
+              botId,
+              threadType: 'group',
+              threadExternalId: groupId,
+              title: groupInfo.name || 'Zalo Group',
+              avatar: groupInfo.avt || null,
+              lastMessageAt: new Date(0),
+              metadata: {
+                memberCount: groupInfo.totalMember || 0,
+              },
+            },
+            update: {
+              title: groupInfo.name || undefined,
+              avatar: groupInfo.avt || undefined,
+            },
+          });
+
+          // Shallow merge metadata
+          const existingMeta = (conversation.metadata as Record<string, any>) || {};
+          await this.prisma.conversation.update({
+            where: { id: conversation.id },
+            data: {
+              metadata: {
+                ...existingMeta,
+                memberCount: groupInfo.totalMember || 0,
+              },
+            },
+          });
+        }
+      }
+      this.logger.log(`Successfully synced groups list for botId=${botId}`);
+    } catch (error) {
+      this.logger.error(`Failed to sync groups for botId=${botId}: ${(error as Error).message}`);
     }
   }
 

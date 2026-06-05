@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ZaloInstanceRegistry } from './zalo-instance.registry';
 import { RedisService } from '@/shared/redis/redis.service';
+import { Buffer } from 'buffer';
 
 export type ZaloUserProfile = {
   displayName: string | null;
@@ -216,10 +217,32 @@ export class ZaloZcaService {
         throw new Error('Image attachment is required for image messages');
       }
       const [first] = msg.attachments;
+
+      let attachmentSource: any;
+      if (first.url.startsWith('data:')) {
+        const match = first.url.match(/^data:([^;]+);name=([^;]+);base64,(.+)$/);
+        if (match) {
+          const [, mimeType, encodedName, base64Data] = match;
+          const fileName = decodeURIComponent(encodedName);
+          const buffer = Buffer.from(base64Data, 'base64');
+          attachmentSource = {
+            data: buffer,
+            filename: fileName,
+            metadata: {
+              totalSize: buffer.length,
+            },
+          };
+        } else {
+          attachmentSource = first.url;
+        }
+      } else {
+        attachmentSource = first.url;
+      }
+
       return api.sendMessage?.(
         {
           msg: first.caption ?? msg.text ?? '',
-          attachments: [{ data: first.url }],
+          attachments: attachmentSource,
         },
         threadId,
         threadType,
@@ -235,6 +258,7 @@ export class ZaloZcaService {
       onMessage: (message: any) => Promise<void> | void;
       onClosed: (code: any) => Promise<void> | void;
       onFriendEvent?: (event: any) => Promise<void> | void;
+      onReaction?: (reaction: any) => Promise<void> | void;
     },
   ): void {
     const api = this.instances.get(botExternalId) as {
@@ -257,6 +281,71 @@ export class ZaloZcaService {
       if (callbacks.onFriendEvent) {
         void callbacks.onFriendEvent(event);
       }
+    });
+    api.listener.on?.('reaction', (reaction: unknown) => {
+      if (callbacks.onReaction) {
+        void callbacks.onReaction(reaction);
+      }
+    });
+  }
+
+  async getGroupInfo(botExternalId: string, groupId: string): Promise<any | null> {
+    const api = this.instances.get(botExternalId) as {
+      getGroupInfo?: (groupId: string | string[]) => Promise<{ gridInfoMap?: Record<string, any> }>;
+    } | undefined;
+    if (typeof api?.getGroupInfo !== 'function') return null;
+    try {
+      const res = await api.getGroupInfo(groupId);
+      return res?.gridInfoMap?.[groupId] ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async getAllGroups(botExternalId: string): Promise<string[]> {
+    const api = this.instances.get(botExternalId) as {
+      getAllGroups?: () => Promise<{ gridVerMap?: Record<string, string> }>;
+    } | undefined;
+    if (typeof api?.getAllGroups !== 'function') return [];
+    try {
+      const res = await api.getAllGroups();
+      return Object.keys(res?.gridVerMap ?? {});
+    } catch {
+      return [];
+    }
+  }
+
+  async getGroupChatHistory(botExternalId: string, groupId: string, count?: number): Promise<any | null> {
+    const api = this.instances.get(botExternalId) as {
+      getGroupChatHistory?: (groupId: string, count?: number) => Promise<{ groupMsgs?: any[] }>;
+    } | undefined;
+    if (typeof api?.getGroupChatHistory !== 'function') return null;
+    try {
+      return await api.getGroupChatHistory(groupId, count);
+    } catch {
+      return null;
+    }
+  }
+
+  async addReaction(
+    botExternalId: string,
+    threadId: string,
+    threadType: number,
+    messageExternalId: string,
+    reactIcon: string,
+  ): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api || typeof api.addReaction !== 'function') {
+      throw new Error(`addReaction not supported by bot: ${botExternalId}`);
+    }
+
+    return api.addReaction(reactIcon, {
+      data: {
+        msgId: messageExternalId,
+        cliMsgId: '',
+      },
+      threadId,
+      type: threadType,
     });
   }
 }

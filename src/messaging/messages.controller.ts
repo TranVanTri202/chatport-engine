@@ -15,6 +15,8 @@ import { RetrievalService } from '@/rag/retrieval.service';
 import { LlmService } from '@/llm/llm.service';
 import { AppConfig } from '@/shared/config/app.config';
 import { BotResponseService } from '@/bot/bot-response.service';
+import { ReactMessageDto } from './dto/react-message.dto';
+import { ZaloZcaService } from '@/channels/zalo/zalo-zca.service';
 
 
 @ApiTags('messages')
@@ -30,6 +32,7 @@ export class MessagesController {
     private readonly llm: LlmService,
     private readonly config: AppConfig,
     private readonly botResponse: BotResponseService,
+    private readonly zaloZca: ZaloZcaService,
   ) {}
 
   @Post('send/text')
@@ -76,9 +79,25 @@ export class MessagesController {
         threadType: body.threadType,
         type: MessageType.image,
         text: body.caption,
-        attachments: [{ url: `buffer:${file.originalname}` }],
+        attachments: [
+          {
+            url: `data:${file.mimetype};name=${encodeURIComponent(file.originalname)};base64,${file.buffer.toString('base64')}`,
+          },
+        ],
         quote: body.quoteMessageExternalId ? { messageExternalId: body.quoteMessageExternalId } : undefined,
       }),
     );
+  }
+
+  @Post('react')
+  async reactMessage(@Body() body: ReactMessageDto) {
+    await this.zaloZca.addReaction(
+      body.botExternalId,
+      body.threadId,
+      body.threadType === 'group' ? 1 : 0,
+      body.messageExternalId,
+      body.reactIcon,
+    );
+    return { success: true };
   }
 }

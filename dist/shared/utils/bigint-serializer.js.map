@@ -1,0 +1,1 @@
+{"version":3,"file":"bigint-serializer.js","sourceRoot":"","sources":["../../../src/shared/utils/bigint-serializer.ts"],"names":[],"mappings":";;AAOA,kEAKC;AALD,SAAgB,2BAA2B;IAExC,MAAM,CAAC,SAAiB,CAAC,MAAM,GAAG,SAAS,MAAM;QAChD,OAAO,IAAI,CAAC,QAAQ,EAAE,CAAC;IACzB,CAAC,CAAC;AACJ,CAAC"}

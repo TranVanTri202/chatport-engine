@@ -11,6 +11,7 @@ import { BotModule } from '@/bot/bot.module';
 import { QuotaModule } from '@/quota/quota.module';
 import { RagModule } from '@/rag/rag.module';
 import { LlmModule } from '@/llm/llm.module';
+import { ZaloModule } from '@/channels/zalo/zalo.module';
 import { MessagingPublisher } from './messaging.publisher';
 import { MessageHandler } from './message.handler';
 import { ReplyPolicyService } from './reply-policy.service';
@@ -34,6 +35,7 @@ import { OutboundMessageMapper } from './outbound-message.mapper';
     QuotaModule,
     forwardRef(() => RagModule),
     LlmModule,
+    forwardRef(() => ZaloModule),
   ],
   controllers: [MessagesController],
   providers: [

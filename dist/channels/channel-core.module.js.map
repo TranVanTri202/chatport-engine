@@ -1,0 +1,1 @@
+{"version":3,"file":"channel-core.module.js","sourceRoot":"","sources":["../../src/channels/channel-core.module.ts"],"names":[],"mappings":";;;;;;;;;AAAA,2CAAgD;AAChD,yEAA6D;AAWtD,IAAM,iBAAiB,GAAvB,MAAM,iBAAiB;CAAG,CAAA;AAApB,8CAAiB;4BAAjB,iBAAiB;IAL7B,IAAA,eAAM,GAAE;IACR,IAAA,eAAM,EAAC;QACN,SAAS,EAAE,CAAC,0CAAe,CAAC;QAC5B,OAAO,EAAE,CAAC,0CAAe,CAAC;KAC3B,CAAC;GACW,iBAAiB,CAAG"}

@@ -74,33 +74,10 @@ export class OutboundProcessor extends WorkerHost {
         throw err;
       }
 
-      const conversation = await this.conversations.getOrCreate({
-        botId: msg.botId,
-        threadType: msg.threadType,
-        threadExternalId: msg.threadId,
-      });
-
-      const persisted = await this.messages.persistOutbound({
-        conversationId: conversation.id,
-        direction: MessageDirection.out,
-        text: msg.text,
-        attachments: msg.attachments ?? [],
-        messageExternalId: sendResult.messageExternalId,
-        senderExternalId: msg.botExternalId,
-      });
-
-      const bot = await this.prisma.bot.findUniqueOrThrow({
-        where: { id: msg.botId },
-      });
-
-      const event: MessageSentEvent = {
-        bot,
-        outbound: msg,
-        conversationId: conversation.id,
-        messageId: persisted.id.toString(),
-        sentAt: sendResult.sentAt,
-      };
-      this.events.emit(DOMAIN_EVENTS.MessageSent, event);
+      // We no longer persist the outbound message here.
+      // Instead, we let the channel's listener (webhook/event listener) capture the sent event
+      // and call MessageHandler.handle, which will persist the message with the proper Zalo message ID
+      // and CDN URLs, and emit DOMAIN_EVENTS.MessageReceived (message:new).
     } finally {
       await this.redis.releaseLock(lockKey, token);
     }

@@ -1,0 +1,30 @@
+import { OnModuleInit } from '@nestjs/common';
+import { ChannelType } from '@/shared/types';
+import { ZaloQrStorageService } from './zalo-qr-storage.service';
+import { IChannelAdapter, OutboundMessage, SendResult, StartLoginInput, StartLoginResult, ChannelStatus } from '../channel-adapter.interface';
+import { ChannelRegistry } from '../channel-registry.service';
+import { ZaloInstanceRegistry } from './zalo-instance.registry';
+import { ZaloSessionService } from './zalo-session.service';
+import { ZaloListeners } from './zalo.listeners';
+import { PrismaService } from '@/shared/prisma/prisma.service';
+import { ZaloZcaService } from './zalo-zca.service';
+export declare class ZaloAdapter implements IChannelAdapter, OnModuleInit {
+    private readonly registry;
+    private readonly instances;
+    private readonly sessions;
+    private readonly listeners;
+    private readonly qrStorage;
+    private readonly prisma;
+    private readonly zca;
+    readonly channel = ChannelType.zalo;
+    private readonly logger;
+    constructor(registry: ChannelRegistry, instances: ZaloInstanceRegistry, sessions: ZaloSessionService, listeners: ZaloListeners, qrStorage: ZaloQrStorageService, prisma: PrismaService, zca: ZaloZcaService);
+    onModuleInit(): void;
+    startLogin(input: StartLoginInput): Promise<StartLoginResult>;
+    restore(botId: number): Promise<void>;
+    syncFriends(botId: number, botExternalId: string): Promise<void>;
+    syncGroups(botId: number, botExternalId: string): Promise<void>;
+    logout(botId: number): Promise<void>;
+    send(botExternalId: string, msg: OutboundMessage): Promise<SendResult>;
+    status(botExternalId: string): Promise<ChannelStatus>;
+}

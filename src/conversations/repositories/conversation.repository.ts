@@ -47,9 +47,27 @@ export class ConversationRepository {
     senderName: string | null;
     senderAvatar: string | null;
     isSelf?: boolean;
+    memberCount?: number;
   }): Promise<Conversation> {
     const isSelf = input.isSelf ?? false;
     const isGroup = input.threadType === 'group';
+
+    const existing = await this.prisma.conversation.findUnique({
+      where: {
+        botId_threadExternalId: {
+          botId: input.botId,
+          threadExternalId: input.threadExternalId,
+        },
+      },
+      select: { metadata: true },
+    });
+
+    const existingMeta = (existing?.metadata as Record<string, any>) || {};
+    const nextMeta = {
+      ...existingMeta,
+      ...(input.memberCount !== undefined ? { memberCount: input.memberCount } : {}),
+    };
+
     return this.prisma.conversation.upsert({
       where: {
         botId_threadExternalId: {
@@ -70,12 +88,11 @@ export class ConversationRepository {
         lastMessageSenderAvatar: input.senderAvatar,
         lastMessageDirection: isSelf ? 'out' : 'in',
         unread: isSelf ? 0 : 1,
+        metadata: nextMeta,
       },
       update: {
-        ...(!isGroup && {
-          avatar: input.avatar,
-          ...(input.title ? { title: input.title } : {}),
-        }),
+        ...(input.avatar && { avatar: input.avatar }),
+        ...(input.title && { title: input.title }),
         lastMessageAt: input.timestamp,
         lastMessageText: input.text,
         lastMessageSenderId: input.senderExternalId,
@@ -83,6 +100,7 @@ export class ConversationRepository {
         lastMessageSenderAvatar: input.senderAvatar,
         lastMessageDirection: isSelf ? 'out' : 'in',
         unread: isSelf ? 0 : { increment: 1 },
+        metadata: nextMeta,
       },
     });
   }

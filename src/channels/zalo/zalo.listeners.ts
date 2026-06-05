@@ -1,7 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BotStatus } from '@prisma/client';
 import { MessagingPublisher } from '@/messaging/messaging.publisher';
 import { PrismaService } from '@/shared/prisma/prisma.service';
+import { DOMAIN_EVENTS } from '@/shared/events/domain-events';
 import { ZaloNormalizer, ZaloRawMessage } from './zalo.normalizer';
 import { ZaloInstanceRegistry } from './zalo-instance.registry';
 import { ZaloZcaService } from './zalo-zca.service';
@@ -24,6 +26,7 @@ export class ZaloListeners {
     private readonly instances: ZaloInstanceRegistry,
     private readonly prisma: PrismaService,
     private readonly zca: ZaloZcaService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   attach(botExternalId: string, botId: number): void {
@@ -37,6 +40,9 @@ export class ZaloListeners {
       },
       onFriendEvent: async (event) => {
         await this.handleFriendEvent(botId, botExternalId, event);
+      },
+      onReaction: async (reaction) => {
+        await this.handleReaction(botId, botExternalId, reaction);
       },
     });
 
@@ -137,6 +143,101 @@ export class ZaloListeners {
       }
     } catch (error) {
       this.logger.error(`Error handling friend_event for botId=${botId}: ${(error as Error).message}`);
+    }
+  }
+
+  /** Handle real-time message reaction events from Zalo */
+  protected async handleReaction(
+    botId: number,
+    botExternalId: string,
+    event: any,
+  ): Promise<void> {
+    this.logger.log(`Received Zalo reaction_event: msgId=${event?.data?.content?.rMsg?.[0]?.gMsgID} for botId=${botId}`);
+    try {
+      const gMsg = event?.data?.content?.rMsg?.[0];
+      const messageExternalId = gMsg?.gMsgID ? String(gMsg.gMsgID) : null;
+      if (!messageExternalId) return;
+
+      const threadId = event?.threadId;
+      if (!threadId) return;
+
+      const uidFrom = event?.data?.uidFrom;
+      const rIcon = event?.data?.content?.rIcon; // e.g. "/-heart" or "" if removed
+      const dName = event?.data?.dName || 'User';
+
+      // 1. Resolve bot & customer
+      const bot = await this.prisma.bot.findUnique({
+        where: { id: botId },
+        select: { customerId: true },
+      });
+      if (!bot) return;
+
+      // 2. Find conversation by threadId/externalId
+      const conversation = await this.prisma.conversation.findFirst({
+        where: { botId, threadExternalId: String(threadId) },
+        select: { id: true },
+      });
+      if (!conversation) return;
+
+      // 3. Find message by conversationId and messageExternalId
+      const message = await this.prisma.message.findUnique({
+        where: {
+          conversationId_messageExternalId: {
+            conversationId: conversation.id,
+            messageExternalId,
+          },
+        },
+      });
+      if (!message) return;
+
+      // Parse existing reactions
+      let reactionsList: Array<{ userId: string; userName: string; reaction: string }> = [];
+      if (message.reactions && typeof message.reactions === 'string') {
+        try {
+          reactionsList = JSON.parse(message.reactions);
+        } catch {}
+      } else if (Array.isArray(message.reactions)) {
+        reactionsList = message.reactions as any;
+      }
+
+      // Filter out this user's existing reaction
+      reactionsList = reactionsList.filter((r) => r.userId !== String(uidFrom));
+
+      // Map Zalo reaction icons to Emojis
+      const EMOJI_MAP: Record<string, string> = {
+        '/-heart': '❤️',
+        '/-strong': '👍',
+        ':>': '😂',
+        ':o': '😮',
+        ':-((': '😢',
+        ':-h': '😡',
+      };
+
+      if (rIcon && rIcon !== '') {
+        const emoji = EMOJI_MAP[rIcon] || rIcon;
+        reactionsList.push({
+          userId: String(uidFrom),
+          userName: dName,
+          reaction: emoji,
+        });
+      }
+
+      // Update message reactions in DB
+      await this.prisma.message.update({
+        where: { id: message.id },
+        data: { reactions: reactionsList as any },
+      });
+
+      // Emit MessageReacted domain event
+      this.eventEmitter.emit(DOMAIN_EVENTS.MessageReacted, {
+        customerId: bot.customerId,
+        conversationId: conversation.id,
+        messageExternalId,
+        reactions: reactionsList,
+      });
+
+    } catch (error) {
+      this.logger.error(`Error handling reaction_event for botId=${botId}: ${(error as Error).message}`);
     }
   }
 }

@@ -47,7 +47,7 @@ export class ZaloNormalizer {
       channel: ChannelType.zalo,
       botExternalId,
       threadId,
-      threadType: raw.threadType === 'group' ? ThreadType.group : ThreadType.user,
+      threadType: (raw.threadType === 'group' || String(raw.threadType) === '1' || (raw as any).type === 1) ? ThreadType.group : ThreadType.user,
       senderExternalId,
       senderName: payload.dName ?? raw.senderName,
       messageExternalId: String(payload.msgId ?? raw.msgId ?? ''),
