@@ -1,8 +1,10 @@
 import {
+  Body,
   Controller,
   Get,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
@@ -73,6 +75,15 @@ export class ConversationsController {
   @Post(':id/read')
   async markRead(@Param('id', ParseIntPipe) id: number) {
     await this.conversations.markRead(id);
+    return { ok: true };
+  }
+
+  @Patch(':id/auto-reply')
+  async toggleAutoReply(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { autoReplyEnabled: boolean },
+  ) {
+    await this.conversations.updateAutoReply(id, body.autoReplyEnabled);
     return { ok: true };
   }
 }

@@ -75,19 +75,28 @@ export class ConversationService {
     const lastMessageSenderName = senderProfile?.displayName ?? msg.senderName ?? null;
     const lastMessageSenderAvatar = senderProfile?.avatar ?? null;
 
-    const avatar = senderProfile?.avatar ?? null;
-    
+    let convoTitle: string | null = null;
+    let convoAvatar: string | null = null;
+
+    if (msg.threadType === 'user') {
+      // In direct chat, the conversation belongs to the other person (threadId)
+      const otherProfile = await this.resolveUserProfile(msg.channel, msg.botExternalId, msg.threadId);
+      convoTitle = otherProfile?.displayName ?? (msg.isSelf ? null : msg.senderName) ?? null;
+      convoAvatar = otherProfile?.avatar ?? null;
+    }
+
     const conversation = await this.repo.upsertConversationFromInbound({
       botId: bot.id,
       threadExternalId: msg.threadId,
       threadType: msg.threadType,
-      title: senderProfile?.displayName ?? null,
-      avatar,
+      title: convoTitle,
+      avatar: convoAvatar,
       timestamp: new Date(msg.timestamp),
       text: msg.text ?? null,
       senderExternalId: msg.senderExternalId,
       senderName: lastMessageSenderName,
       senderAvatar: lastMessageSenderAvatar,
+      isSelf: msg.isSelf,
     });
 
     await this.repo.upsertParticipant({
@@ -196,5 +205,9 @@ export class ConversationService {
 
   async markRead(id: number): Promise<void> {
     await this.repo.updateUnread(id, 0);
+  }
+
+  async updateAutoReply(id: number, autoReplyEnabled: boolean): Promise<void> {
+    await this.repo.updateAutoReply(id, autoReplyEnabled);
   }
 }

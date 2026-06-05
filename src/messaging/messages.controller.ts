@@ -16,20 +16,6 @@ import { LlmService } from '@/llm/llm.service';
 import { AppConfig } from '@/shared/config/app.config';
 import { BotResponseService } from '@/bot/bot-response.service';
 
-class DemoChatDto {
-  @IsString()
-  botExternalId!: string;
-
-  @IsString()
-  sessionId!: string;
-
-  @IsString()
-  text!: string;
-
-  @IsOptional()
-  @IsEnum(ThreadType)
-  threadType?: ThreadType;
-}
 
 @ApiTags('messages')
 @ApiBearerAuth('jwt')
@@ -60,55 +46,6 @@ export class MessagesController {
     );
   }
 
-  @Post('demo/chat')
-  async demoChat(@Body() body: DemoChatDto) {
-    const bot = await this.bots.getByExternal(ChannelType.demo, body.botExternalId);
-
-    const inbound: InboundMessageDto = {
-      channel: ChannelType.demo,
-      botExternalId: body.botExternalId,
-      threadId: body.sessionId,
-      threadType: body.threadType ?? ThreadType.user,
-      senderExternalId: body.sessionId,
-      senderName: 'Demo User',
-      messageExternalId: `demo-${Date.now()}`,
-      timestamp: Date.now(),
-      type: 'chat',
-      text: body.text,
-      attachments: [],
-      isSelf: false,
-    };
-
-    const { conversation } = await this.conversations.upsertFromInbound(inbound);
-
-    await this.messages.persistInbound({
-      conversationId: conversation.id,
-      direction: MessageDirection.in,
-      msg: inbound,
-    });
-
-    const result = await this.botResponse.generateReply(bot, conversation, body.text);
-    if (!result) {
-      throw new BadRequestException('Could not generate bot reply');
-    }
-
-    const outbound = await this.messages.persistOutbound({
-      conversationId: conversation.id,
-      direction: MessageDirection.out,
-      text: result.reply,
-      attachments: [],
-      messageExternalId: null,
-      senderExternalId: bot.externalId,
-    });
-
-    return {
-      bot,
-      conversation,
-      reply: result.reply,
-      documents: result.contexts,
-      message: outbound,
-    };
-  }
 
   @Post('send/image')
   @ApiConsumes('multipart/form-data')

@@ -80,41 +80,23 @@ export class AuthService {
     };
   }
 
-  async loginDemo() {
-    // Demo login is intentionally idempotent: reuse the same demo customer/bot if they already exist.
+  async login(email: string) {
+    const defaultName = email.split('@')[0] || 'User';
     const customer = await this.prisma.customer.upsert({
-      where: { email: DEMO_CUSTOMER_EMAIL },
+      where: { email },
       update: {
-        name: DEMO_CUSTOMER_NAME,
+        name: defaultName,
       },
       create: {
-        email: DEMO_CUSTOMER_EMAIL,
-        name: DEMO_CUSTOMER_NAME,
+        email,
+        name: defaultName,
       },
     });
-
-    const bot =
-      (await this.prisma.bot.findFirst({
-        where: {
-          customerId: customer.id,
-          channel: ChannelType.demo,
-        },
-      })) ??
-      (await this.prisma.bot.create({
-        data: {
-          customerId: customer.id,
-          channel: ChannelType.demo,
-          externalId: randomUUID(),
-          name: 'Demo Bot',
-          status: BotStatus.active,
-        },
-      }));
 
     const accessToken = await this.jwt.signAsync({
       sub: customer.id,
       customerId: customer.id,
       email: customer.email,
-      demo: true,
     });
 
     const refreshToken = await this.generateRefreshToken(customer.id);
@@ -124,8 +106,6 @@ export class AuthService {
       access_token: accessToken,
       refreshToken,
       customer,
-      bot,
-      demo: true,
     };
   }
 

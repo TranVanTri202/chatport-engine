@@ -23,7 +23,7 @@ export class RealtimeListener {
     this.gateway.emitToCustomer(e.bot.customerId, 'message:new', {
       conversationId: e.conversation.id,
       messageId: e.messageId,
-      direction: 'in',
+      direction: e.inbound.isSelf ? 'out' : 'in',
       text: e.inbound.text,
       attachments: e.inbound.attachments,
       senderExternalId: e.inbound.senderExternalId,

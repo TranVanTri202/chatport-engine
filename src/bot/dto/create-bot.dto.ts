@@ -1,5 +1,7 @@
 import { Type } from 'class-transformer';
 import {
+  IsArray,
+  IsBoolean,
   IsEnum,
   IsInt,
   IsNotEmpty,
@@ -112,6 +114,25 @@ export class UpdateBotDto {
   @Min(0)
   @Max(2)
   temperature?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  autoReplyEnabled?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  activeHours?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  fallbackReplies?: string[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  llmModel?: string;
 
   @IsOptional()
   @ValidateNested()

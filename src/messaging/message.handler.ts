@@ -31,7 +31,7 @@ export class MessageHandler {
 
     const persisted = await this.messages.persistInbound({
       conversationId: conversation.id,
-      direction: MessageDirection.in,
+      direction: msg.isSelf ? MessageDirection.out : MessageDirection.in,
       msg,
     });
 

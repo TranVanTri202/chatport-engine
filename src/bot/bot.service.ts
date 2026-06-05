@@ -26,7 +26,7 @@ export class BotService {
     private readonly quota: QuotaService,
   ) {}
 
-  list(customerId: number): Promise<Bot[]> {
+  list(customerId: number): Promise<any[]> {
     return this.repo.findManyByCustomer(customerId);
   }
 

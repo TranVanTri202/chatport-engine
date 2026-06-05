@@ -16,9 +16,17 @@ import { ChannelType } from '@/shared/types';
 export class BotRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  findManyByCustomer(customerId: number): Promise<Bot[]> {
+  findManyByCustomer(customerId: number) {
     return this.prisma.bot.findMany({
       where: { customerId },
+      include: {
+        _count: {
+          select: {
+            friendRequests: true,
+            contacts: { where: { isFriend: true } },
+          },
+        },
+      },
       orderBy: { id: 'desc' },
     });
   }

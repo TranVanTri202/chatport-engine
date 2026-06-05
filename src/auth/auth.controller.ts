@@ -22,6 +22,13 @@ class RefreshTokenDto {
   refreshToken!: string;
 }
 
+class LocalLoginDto {
+  @ApiProperty({ example: 'ban@congty.vn' })
+  @IsString()
+  @IsNotEmpty()
+  email!: string;
+}
+
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
@@ -38,9 +45,9 @@ export class AuthController {
   }
 
   @Public()
-  @Post('login/demo')
-  async demoLogin() {
-    return this.authService.loginDemo();
+  @Post('login')
+  async login(@Body() body: LocalLoginDto) {
+    return this.authService.login(body.email);
   }
 
   @Public()

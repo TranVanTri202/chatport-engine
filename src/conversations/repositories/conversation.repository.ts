@@ -46,7 +46,10 @@ export class ConversationRepository {
     senderExternalId: string;
     senderName: string | null;
     senderAvatar: string | null;
+    isSelf?: boolean;
   }): Promise<Conversation> {
+    const isSelf = input.isSelf ?? false;
+    const isGroup = input.threadType === 'group';
     return this.prisma.conversation.upsert({
       where: {
         botId_threadExternalId: {
@@ -58,26 +61,28 @@ export class ConversationRepository {
         botId: input.botId,
         threadType: input.threadType,
         threadExternalId: input.threadExternalId,
-        title: input.title,
+        title: input.title || (isGroup ? 'Zalo Group' : 'Stranger'),
         avatar: input.avatar,
         lastMessageAt: input.timestamp,
         lastMessageText: input.text,
         lastMessageSenderId: input.senderExternalId,
         lastMessageSenderName: input.senderName,
         lastMessageSenderAvatar: input.senderAvatar,
-        lastMessageDirection: 'in',
-        unread: 1,
+        lastMessageDirection: isSelf ? 'out' : 'in',
+        unread: isSelf ? 0 : 1,
       },
       update: {
-        avatar: input.avatar,
+        ...(!isGroup && {
+          avatar: input.avatar,
+          ...(input.title ? { title: input.title } : {}),
+        }),
         lastMessageAt: input.timestamp,
         lastMessageText: input.text,
         lastMessageSenderId: input.senderExternalId,
         lastMessageSenderName: input.senderName,
         lastMessageSenderAvatar: input.senderAvatar,
-        lastMessageDirection: 'in',
-        unread: { increment: 1 },
-        ...(input.title ? { title: input.title } : {}),
+        lastMessageDirection: isSelf ? 'out' : 'in',
+        unread: isSelf ? 0 : { increment: 1 },
       },
     });
   }
@@ -181,6 +186,13 @@ export class ConversationRepository {
     return this.prisma.conversation.update({
       where: { id },
       data: { unread },
+    });
+  }
+
+  async updateAutoReply(id: number, autoReplyEnabled: boolean): Promise<Conversation> {
+    return this.prisma.conversation.update({
+      where: { id },
+      data: { autoReplyEnabled },
     });
   }
 }

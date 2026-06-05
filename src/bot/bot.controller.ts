@@ -81,7 +81,7 @@ export class BotController {
     @Param('channel') channel: ChannelType,
     @Param('externalId') externalId: string,
   ) {
-    return this.bots.getSystemPrompt(channel, externalId);
+    return this.bots.getSystemPrompt(channel, externalId).then((systemPrompt) => ({ systemPrompt }));
   }
 
   @Patch(':channel/:externalId/system-prompt')

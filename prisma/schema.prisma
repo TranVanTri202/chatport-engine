@@ -52,6 +52,7 @@ model Customer {
   name         String
   picture      String?
   firebaseUid  String?    @unique
+  preferences  Json       @default("{\"lang\":\"vi\",\"theme\":\"dark\",\"accent\":\"green\",\"dashLayout\":\"grid\",\"density\":\"regular\"}")
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   bots         Bot[]
@@ -67,6 +68,9 @@ model Bot {
   avatar        String?
   status        BotStatus      @default(inactive)
   systemPrompt  String?        @db.Text
+  autoReplyEnabled Boolean      @default(false)
+  activeHours   String?
+  fallbackReplies String[]
 
   // === Per-bot LLM / RAG settings. All optional — null = fall back to env. ===
   llmModel         String?
@@ -91,6 +95,8 @@ model Bot {
   session       BotSession?
   documents     Document[]
   conversations Conversation[]
+  contacts      Contact[]
+  friendRequests FriendRequest[]
 
   @@unique([channel, externalId])
   @@index([customerId])
@@ -112,6 +118,7 @@ model Conversation {
   title                  String?
   avatar                 String?
   unread                 Int           @default(0)
+  autoReplyEnabled       Boolean       @default(true)
   lastMessageAt          DateTime?
   lastMessageText        String?       @db.Text
   lastMessageSenderId    String?
@@ -197,5 +204,37 @@ model RefreshToken {
   customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   @@index([customerId])
+}
+
+model Contact {
+  id          Int      @id @default(autoincrement())
+  botId       Int
+  externalId  String   // UID của contact trong Zalo
+  name        String
+  phone       String?
+  avatar      String?
+  nickName    String?  // Tên gợi nhớ do admin đặt
+  isFriend    Boolean  @default(true)
+  isOnline    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  bot         Bot      @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  @@unique([botId, externalId])
+  @@index([botId])
+}
+
+model FriendRequest {
+  id          Int      @id @default(autoincrement())
+  botId       Int
+  externalId  String   // UID của người gửi lời mời
+  name        String
+  avatar      String?
+  source      String?  // Nguồn (Ví dụ: "Từ số điện thoại", "Từ nhóm")
+  createdAt   DateTime @default(now())
+  bot         Bot      @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  @@unique([botId, externalId])
+  @@index([botId])
 }
 

@@ -26,6 +26,7 @@ import { AuthModule } from '@/auth/auth.module';
 import { JwtAuthGuard } from '@/auth/jwt-auth.guard';
 import { HealthModule } from '@/health/health.module';
 import { QuotaModule } from '@/quota/quota.module';
+import { ContactsModule } from '@/contacts/contacts.module';
 
 @Module({
   imports: [
@@ -91,6 +92,7 @@ import { QuotaModule } from '@/quota/quota.module';
     RealtimeModule,
     AuthModule,
     HealthModule,
+    ContactsModule,
   ],
   providers: [
     // Order matters: throttler → auth. Filter + interceptor are globals.

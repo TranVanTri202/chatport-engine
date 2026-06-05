@@ -41,12 +41,63 @@ export class BotResponseService {
     private readonly quota: QuotaService,
   ) {}
 
+  private isWithinActiveHours(hoursStr: string | null): boolean {
+    if (!hoursStr || hoursStr.trim() === '' || hoursStr === '24/7') return true;
+    try {
+      const cleaned = hoursStr.replace(/\s+/g, '');
+      const parts = cleaned.split('-');
+      if (parts.length !== 2) return true;
+      const [startStr, endStr] = parts;
+      
+      const now = new Date();
+      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+      
+      const parseTimeToMinutes = (t: string) => {
+        const [h, m] = t.split(':').map(Number);
+        return h * 60 + m;
+      };
+      
+      const startMinutes = parseTimeToMinutes(startStr);
+      const endMinutes = parseTimeToMinutes(endStr);
+      
+      if (startMinutes <= endMinutes) {
+        return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+      } else {
+        // Overnight hours, e.g. "22:00-06:00"
+        return currentMinutes >= startMinutes || currentMinutes <= endMinutes;
+      }
+    } catch (err) {
+      return true;
+    }
+  }
+
   @OnEvent(DOMAIN_EVENTS.MessageReceived, { async: true, promisify: true })
   async onMessageReceived(event: MessageReceivedEvent): Promise<void> {
     const { bot, conversation, inbound } = event;
 
     if (bot.status !== 'active') return;
+    if (!bot.autoReplyEnabled) return;
+    if (!conversation.autoReplyEnabled) return;
     if (!this.policy.shouldConsider({ bot, conversation, inbound })) return;
+
+    // Check active hours
+    if (!this.isWithinActiveHours(bot.activeHours)) {
+      if (bot.fallbackReplies && bot.fallbackReplies.length > 0) {
+        const randomIndex = Math.floor(Math.random() * bot.fallbackReplies.length);
+        const replyText = bot.fallbackReplies[randomIndex];
+
+        await this.publisher.publishOutbound({
+          botId: bot.id,
+          channel: bot.channel as ChannelType,
+          botExternalId: bot.externalId,
+          threadId: conversation.threadExternalId,
+          threadType: conversation.threadType as ThreadType,
+          type: MessageType.chat,
+          text: replyText,
+        });
+      }
+      return;
+    }
 
     try {
       const userText = inbound.text!.trim();
