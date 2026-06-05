@@ -89,55 +89,82 @@ export class BotResponseService {
     // Quota check — can throw QuotaExceededError
     await this.quota.consumeRequest(bot.id);
 
-    const topK = bot.ragTopK ?? this.config.ragTopKDefault;
-    const contexts = await this.retrieval.search(bot.id, userText, topK);
+    try {
+      const topK = bot.ragTopK ?? this.config.ragTopKDefault;
+      const contexts = await this.retrieval.search(bot.id, userText, topK);
 
-    const historyLimit = this.config.conversationHistoryLimit;
-    const recentLimit = this.config.conversationRecentLimit;
-    const summaryTriggerLimit = this.config.conversationSummaryTriggerLimit;
-    const summaryMaxChars = this.config.conversationSummaryMaxChars;
+      const historyLimit = this.config.conversationHistoryLimit;
+      const recentLimit = this.config.conversationRecentLimit;
+      const summaryTriggerLimit = this.config.conversationSummaryTriggerLimit;
+      const summaryMaxChars = this.config.conversationSummaryMaxChars;
 
-    const history = await this.messages.lastN(conversation.id, historyLimit);
-    const recentMessages = history.slice(-recentLimit);
-    const olderMessages = history.slice(0, Math.max(0, history.length - recentMessages.length));
-    const recentHistory = this.formatRecentHistory(recentMessages);
+      const history = await this.messages.lastN(conversation.id, historyLimit);
+      if (history.length === 0) {
+        await this.quota.refundRequest(bot.id);
+        return null;
+      }
 
-    let summary = await this.conversationSummary(conversation.id);
-    if (olderMessages.length >= summaryTriggerLimit) {
-      summary = await this.updateRollingSummary({
+      // The last message is the current user message (already persisted in DB)
+      const currentMessage = history[history.length - 1]!;
+      const olderHistory = history.slice(0, -1);
+
+      const recentMessages = olderHistory.slice(-recentLimit);
+      const olderMessages = olderHistory.slice(
+        0,
+        Math.max(0, olderHistory.length - recentMessages.length),
+      );
+      const recentHistory = this.formatRecentHistory(recentMessages);
+
+      let summary = await this.conversationSummary(conversation.id);
+      if (olderMessages.length >= summaryTriggerLimit) {
+        summary = await this.updateRollingSummary({
+          botName: bot.name ?? '',
+          conversationId: conversation.id,
+          currentSummary: summary,
+          olderMessages,
+          recentMessages,
+          maxChars: summaryMaxChars,
+        });
+      }
+
+      const conversationState = this.buildConversationState({
         botName: bot.name ?? '',
-        conversationId: conversation.id,
-        currentSummary: summary,
-        olderMessages,
-        recentMessages,
-        maxChars: summaryMaxChars,
+        userText,
+        ragContext: contexts.map((c) => c.content).join('\n---\n'),
+        recentHistory,
+        summary,
       });
+
+      const system = this.interpolateSystemPrompt(systemPrompt, conversationState);
+
+      // If summary exists, only send recent history + current user message.
+      // If no summary exists, send all history (olderHistory + currentMessage = history).
+      const activeMessages = summary ? recentMessages : olderHistory;
+      const chatHistory = [...activeMessages, currentMessage];
+
+      const messages = chatHistory.map((m) => ({
+        role: m.direction === 'out' ? ('assistant' as const) : ('user' as const),
+        content: m.text ?? '',
+      }));
+
+      const reply = await this.llm.chat({
+        system,
+        messages,
+        overrides: this.botOverrides(bot),
+      });
+
+      if (!reply) {
+        await this.quota.refundRequest(bot.id);
+        return null;
+      }
+
+      return { reply, contexts };
+    } catch (err) {
+      await this.quota.refundRequest(bot.id).catch((refundErr) => {
+        this.logger.error(`Failed to refund quota for bot ${bot.id}: ${refundErr.message}`);
+      });
+      throw err;
     }
-
-    const conversationState = this.buildConversationState({
-      botName: bot.name ?? '',
-      userText,
-      ragContext: contexts.map((c) => c.content).join('\n---\n'),
-      recentHistory,
-      summary,
-    });
-
-    const system = this.interpolateSystemPrompt(systemPrompt, conversationState);
-
-    const messages = history.map((m) => ({
-      role: m.direction === 'out' ? ('assistant' as const) : ('user' as const),
-      content: m.text ?? '',
-    }));
-
-    const reply = await this.llm.chat({
-      system,
-      messages,
-      overrides: this.botOverrides(bot),
-    });
-
-    if (!reply) return null;
-
-    return { reply, contexts };
   }
 
   private buildConversationState(input: {

@@ -9,38 +9,11 @@ import { setupSwagger } from '@/shared/swagger/swagger';
 
 installBigIntJsonSerializer();
 
-const REQUIRED_ENV_VARS = [
-  'DATABASE_URL',
-  'REDIS_URL',
-  'OPENAI_API_KEY',
-  'FIREBASE_PROJECT_ID',
-  'JWT_SECRET',
-  'LLM_MODEL',
-  'LLM_TEMPERATURE',
-  'LLM_MAX_TOKENS',
-  'LLM_TOP_P',
-  'LLM_FREQUENCY_PENALTY',
-  'LLM_PRESENCE_PENALTY',
-  'EMBEDDING_MODEL',
-  'EMBEDDING_DIMS',
-  'RAG_TOP_K',
-  'SOCKET_CORS_ORIGIN',
-  'LOG_LEVEL',
-] as const;
-
-function assertRequiredEnvVars(): void {
-  const missing = REQUIRED_ENV_VARS.filter((key) => !process.env[key]?.trim());
-
-  if (missing.length > 0) {
-    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
-  }
-}
-
 async function bootstrap(): Promise<void> {
-  assertRequiredEnvVars();
-
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   app.useLogger(app.get(PinoLogger));
+
+  app.setGlobalPrefix('api/v1');
 
   const config = app.get(AppConfig);
 

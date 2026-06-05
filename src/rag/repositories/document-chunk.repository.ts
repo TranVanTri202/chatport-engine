@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/shared/prisma/prisma.service';
 
 export interface RetrievedChunkRow {
@@ -10,6 +11,26 @@ export interface RetrievedChunkRow {
 @Injectable()
 export class DocumentChunkRepository {
   constructor(private readonly prisma: PrismaService) {}
+
+  async replaceChunks(
+    documentId: number,
+    chunks: Array<{ ordinal: number; content: string; tokenCount: number; embeddingLiteral: string }>,
+  ): Promise<void> {
+    if (chunks.length === 0) {
+      await this.prisma.documentChunk.deleteMany({ where: { documentId } });
+      return;
+    }
+    const valueSqls = chunks.map(
+      (c) => Prisma.sql`(${documentId}, ${c.ordinal}, ${c.content}, ${c.tokenCount}, ${c.embeddingLiteral}::vector)`
+    );
+    await this.prisma.$transaction([
+      this.prisma.documentChunk.deleteMany({ where: { documentId } }),
+      this.prisma.$executeRaw`
+        INSERT INTO "DocumentChunk" ("documentId", "ordinal", "content", "tokenCount", "embedding")
+        VALUES ${Prisma.join(valueSqls)}
+      `
+    ]);
+  }
 
   async deleteManyByDocument(documentId: number): Promise<void> {
     await this.prisma.documentChunk.deleteMany({

@@ -39,6 +39,10 @@ export class QuotaService {
     );
   }
 
+  async refundRequest(botId: number): Promise<void> {
+    await this.bots.refundRequest(botId);
+  }
+
   async assertCanAttachDocuments(
     botId: number,
     newDocIds: number[],

@@ -112,6 +112,14 @@ export class BotRepository {
     return rows[0] ?? null;
   }
 
+  async refundRequest(botId: number): Promise<void> {
+    await this.prisma.$executeRaw`
+      UPDATE "Bot"
+         SET "requestUsed" = GREATEST(0, "requestUsed" - 1), "updatedAt" = NOW()
+       WHERE id = ${botId}
+    `;
+  }
+
   /** Reset the trial counter — admin endpoint or future "renew plan" flow. */
   async resetRequestCounter(botId: number): Promise<void> {
     await this.prisma.bot.update({

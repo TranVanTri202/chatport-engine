@@ -24,9 +24,10 @@ export class EmbeddingService {
     });
   }
 
-  /** Cached single-query embedding — used by RetrievalService. */
   async embedQuery(query: string): Promise<number[]> {
-    const key = `embed:q:${sha1Hex(query)}`;
+    const model = this.config.embeddingModel;
+    const dims = this.config.embeddingDims;
+    const key = `embed:q:${model}:${dims}:${sha1Hex(query)}`;
     const cached = await this.redis.cacheGet<number[]>(key);
     if (cached) return cached;
 

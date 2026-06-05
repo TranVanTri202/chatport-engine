@@ -37,9 +37,14 @@ export class EmbedProcessor extends WorkerHost {
 
     const from = doc.status;
     try {
-      await this.chunkRepo.deleteManyByDocument(documentId);
-
       const chunks = await this.chunker.chunk(doc.rawText);
+      const chunkData: Array<{
+        ordinal: number;
+        content: string;
+        tokenCount: number;
+        embeddingLiteral: string;
+      }> = [];
+
       if (chunks.length > 0) {
         const vectors = await this.embeddings.embedBatch(
           chunks.map((c) => c.content),
@@ -48,8 +53,7 @@ export class EmbedProcessor extends WorkerHost {
           const c = chunks[i]!;
           const vec = vectors[i]!;
           const literal = `[${vec.join(',')}]`;
-          await this.chunkRepo.insertChunk({
-            documentId,
+          chunkData.push({
             ordinal: c.ordinal,
             content: c.content,
             tokenCount: c.tokenCount,
@@ -57,6 +61,8 @@ export class EmbedProcessor extends WorkerHost {
           });
         }
       }
+
+      await this.chunkRepo.replaceChunks(documentId, chunkData);
 
       const updated = await this.docRepo.update(documentId, { status: 'embedded' });
       this.events.emit(DOMAIN_EVENTS.DocumentStatusChanged, {
