@@ -90,6 +90,10 @@ export class AppConfig {
     return this.cs.getOrThrow<string>('JWT_EXPIRES_IN');
   }
 
+  get jwtRefreshExpiresInDays(): number {
+    return Number(this.cs.getOrThrow<number>('JWT_REFRESH_EXPIRES_IN_DAYS'));
+  }
+
   get socketCorsOrigin(): string {
     return this.cs.getOrThrow<string>('SOCKET_CORS_ORIGIN');
   }

@@ -1,6 +1,6 @@
 import { Body, Controller, Post } from '@nestjs/common';
 import { ApiProperty, ApiTags } from '@nestjs/swagger';
-import { IsIn, IsString } from 'class-validator';
+import { IsIn, IsString, IsNotEmpty } from 'class-validator';
 import { Public } from './public.decorator';
 import { AuthService, SocialProvider } from './auth.service';
 import { FirebaseAuthService } from './firebase-auth.service';
@@ -13,6 +13,13 @@ class FirebaseLoginDto {
   @ApiProperty({ example: 'eyJhbGciOiJSUzI1NiIs...' })
   @IsString()
   idToken!: string;
+}
+
+class RefreshTokenDto {
+  @ApiProperty({ example: '3213ab1c...' })
+  @IsString()
+  @IsNotEmpty()
+  refreshToken!: string;
 }
 
 @ApiTags('auth')
@@ -34,5 +41,18 @@ export class AuthController {
   @Post('login/demo')
   async demoLogin() {
     return this.authService.loginDemo();
+  }
+
+  @Public()
+  @Post('refresh')
+  async refresh(@Body() body: RefreshTokenDto) {
+    return this.authService.refresh(body.refreshToken);
+  }
+
+  @Public()
+  @Post('logout')
+  async logout(@Body() body: RefreshTokenDto) {
+    await this.authService.logout(body.refreshToken);
+    return { ok: true };
   }
 }
