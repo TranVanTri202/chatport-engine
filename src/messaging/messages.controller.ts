@@ -117,4 +117,50 @@ export class MessagesController {
     );
     return { success: true };
   }
+
+  @Post('pin')
+  async pinMessage(@Body() body: PinMessageDto) {
+    await this.zaloZca.pinMessage(
+      body.botExternalId,
+      body.threadId,
+      body.messageExternalId,
+      true,
+    );
+    return { success: true };
+  }
+
+  @Post('unpin')
+  async unpinMessage(@Body() body: UnpinMessageDto) {
+    await this.zaloZca.unpinMessage(
+      body.botExternalId,
+      body.threadId,
+      body.topicId,
+    );
+    return { success: true };
+  }
+}
+
+export class PinMessageDto {
+  @IsString()
+  botExternalId: string;
+
+  @IsString()
+  threadId: string;
+
+  @IsString()
+  threadType: string;
+
+  @IsString()
+  messageExternalId: string;
+}
+
+export class UnpinMessageDto {
+  @IsString()
+  botExternalId: string;
+
+  @IsString()
+  threadId: string;
+
+  @IsString()
+  topicId: string;
 }

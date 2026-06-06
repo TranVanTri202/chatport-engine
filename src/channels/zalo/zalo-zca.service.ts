@@ -358,17 +358,17 @@ export class ZaloZcaService {
     let cliMsgId = '0';
 
     try {
-      const bot = await this.prisma.bot.findUnique({
+      const bot = await (this.prisma as any).bot.findUnique({
         where: { channel_externalId: { channel: 'zalo', externalId: botExternalId } },
         select: { id: true },
       });
       if (bot) {
-        const conversation = await this.prisma.conversation.findFirst({
+        const conversation = await (this.prisma as any).conversation.findFirst({
           where: { botId: bot.id, threadExternalId: threadId },
           select: { id: true },
         });
         if (conversation) {
-          const message = await this.prisma.message.findUnique({
+          const message = await (this.prisma as any).message.findUnique({
             where: {
               conversationId_messageExternalId: {
                 conversationId: conversation.id,
@@ -442,17 +442,17 @@ export class ZaloZcaService {
     let cliMsgId = '0';
 
     try {
-      const bot = await this.prisma.bot.findUnique({
+      const bot = await (this.prisma as any).bot.findUnique({
         where: { channel_externalId: { channel: 'zalo', externalId: botExternalId } },
         select: { id: true },
       });
       if (bot) {
-        const conversation = await this.prisma.conversation.findFirst({
+        const conversation = await (this.prisma as any).conversation.findFirst({
           where: { botId: bot.id, threadExternalId: threadId },
           select: { id: true },
         });
         if (conversation) {
-          const message = await this.prisma.message.findUnique({
+          const message = await (this.prisma as any).message.findUnique({
             where: {
               conversationId_messageExternalId: {
                 conversationId: conversation.id,
@@ -521,6 +521,197 @@ export class ZaloZcaService {
     } catch (err) {
       console.error(`[ZaloZcaService.sendTypingEvent] ZCA error:`, err);
       return null;
+    }
+  }
+
+  async pinMessage(
+    botExternalId: string,
+    threadId: string,
+    messageExternalId: string,
+    pinAct: boolean,
+  ): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api) {
+      throw new Error(`Bot instance not found: ${botExternalId}`);
+    }
+
+    if (typeof api.pinMessage !== 'function') {
+      api.custom('pinMessage', async ({ ctx, utils, props }: any) => {
+        const serviceURL = utils.makeURL(`${api.zpwServiceMap.group_board[0]}/api/board/topic/updatev2`);
+        const params = {
+          grid: props.groupId,
+          type: 2, // Message
+          color: -16777216,
+          emoji: "",
+          startTime: -1,
+          duration: -1,
+          params: JSON.stringify({
+            senderUid: props.senderUid || "",
+            senderName: props.senderName || "",
+            client_msg_id: props.clientMsgId || "",
+            global_msg_id: props.globalMsgId || "",
+            msg_type: props.msgType || 1,
+            title: props.title || "",
+          }),
+          topicId: props.topicId || "",
+          repeat: 0,
+          imei: ctx.imei,
+          pinAct: props.pinAct ? 1 : 2,
+        };
+        const encryptedParams = utils.encodeAES(JSON.stringify(params));
+        if (!encryptedParams) throw new Error("Failed to encrypt params");
+        const response = await utils.request(serviceURL, {
+          method: "POST",
+          body: new URLSearchParams({
+            params: encryptedParams,
+          }),
+        });
+        return utils.resolve(response, (result: any) => result.data);
+      });
+    }
+
+    const bot = await (this.prisma as any).bot.findUnique({
+      where: { channel_externalId: { channel: 'zalo', externalId: botExternalId } },
+      select: { id: true },
+    });
+    if (!bot) throw new Error('Bot not found');
+
+    const conversation = await (this.prisma as any).conversation.findFirst({
+      where: { botId: bot.id, threadExternalId: threadId },
+      select: { id: true },
+    });
+    if (!conversation) throw new Error('Conversation not found');
+
+    const message = await (this.prisma as any).message.findUnique({
+      where: {
+        conversationId_messageExternalId: {
+          conversationId: conversation.id,
+          messageExternalId,
+        },
+      },
+    });
+    if (!message) throw new Error('Message not found');
+
+    const participant = await (this.prisma as any).participant.findFirst({
+      where: { conversationId: conversation.id, externalId: message.senderExternalId || undefined },
+      select: { displayName: true },
+    });
+    const senderName = participant?.displayName || 'Thành viên';
+
+    let client_msg_id = '0';
+    if (message.raw && typeof message.raw === 'object') {
+      const raw = message.raw as any;
+      const data = raw.data || {};
+      client_msg_id = String(raw.cliMsgId || data.cliMsgId || '0');
+    }
+    if (client_msg_id === '0' || !client_msg_id) {
+      client_msg_id = String(message.createdAt.getTime());
+    }
+
+    let msg_type = 1;
+    let title = message.text || '';
+    if (message.attachments && Array.isArray(message.attachments) && message.attachments.length > 0) {
+      const firstAttach = message.attachments[0] as any;
+      if (firstAttach.type === 'image') {
+        msg_type = 32;
+        title = '[Hình ảnh]';
+      } else if (firstAttach.type === 'video') {
+        msg_type = 44;
+        title = '[Video]';
+      } else if (firstAttach.type === 'file') {
+        msg_type = 46;
+        title = firstAttach.name || '[File]';
+      }
+    }
+
+    try {
+      return await api.pinMessage({
+        groupId: threadId,
+        senderUid: message.senderExternalId || botExternalId,
+        senderName,
+        clientMsgId: client_msg_id,
+        globalMsgId: message.messageExternalId,
+        msgType: msg_type,
+        title,
+        pinAct,
+      });
+    } catch (err) {
+      console.error('[ZaloZcaService.pinMessage] Error pinning message:', err);
+      throw err;
+    }
+  }
+
+  async unpinMessage(
+    botExternalId: string,
+    threadId: string,
+    topicId: string,
+  ): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api) {
+      throw new Error(`Bot instance not found: ${botExternalId}`);
+    }
+
+    if (typeof api.pinMessage !== 'function') {
+      api.custom('pinMessage', async ({ ctx, utils, props }: any) => {
+        const serviceURL = utils.makeURL(`${api.zpwServiceMap.group_board[0]}/api/board/topic/updatev2`);
+        const params = {
+          grid: props.groupId,
+          type: 2, // Message
+          color: -16777216,
+          emoji: "",
+          startTime: -1,
+          duration: -1,
+          params: JSON.stringify({
+            senderUid: props.senderUid || "",
+            senderName: props.senderName || "",
+            client_msg_id: props.clientMsgId || "",
+            global_msg_id: props.globalMsgId || "",
+            msg_type: props.msgType || 1,
+            title: props.title || "",
+          }),
+          topicId: props.topicId || "",
+          repeat: 0,
+          imei: ctx.imei,
+          pinAct: props.pinAct ? 1 : 2,
+        };
+        const encryptedParams = utils.encodeAES(JSON.stringify(params));
+        if (!encryptedParams) throw new Error("Failed to encrypt params");
+        const response = await utils.request(serviceURL, {
+          method: "POST",
+          body: new URLSearchParams({
+            params: encryptedParams,
+          }),
+        });
+        return utils.resolve(response, (result: any) => result.data);
+      });
+    }
+
+    try {
+      return await api.pinMessage({
+        groupId: threadId,
+        topicId,
+        pinAct: false,
+      });
+    } catch (err) {
+      console.error('[ZaloZcaService.unpinMessage] Error unpinning message:', err);
+      throw err;
+    }
+  }
+
+  async getListBoard(
+    botExternalId: string,
+    threadId: string,
+  ): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api || typeof api.getListBoard !== 'function') {
+      throw new Error(`getListBoard not supported by bot: ${botExternalId}`);
+    }
+
+    try {
+      return await api.getListBoard({ page: 1, count: 20 }, threadId);
+    } catch (err) {
+      console.error('[ZaloZcaService.getListBoard] Error fetching list board:', err);
+      throw err;
     }
   }
 }

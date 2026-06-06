@@ -284,14 +284,14 @@ export class ZaloListeners {
       const updateMembers = event?.data?.updateMembers || [];
 
       // 1. Resolve bot & customer
-      const bot = await this.prisma.bot.findUnique({
+      const bot = await (this.prisma as any).bot.findUnique({
         where: { id: botId },
         select: { customerId: true },
       });
       if (!bot) return;
 
       // 2. Find or create the conversation
-      let conversation = await this.prisma.conversation.findUnique({
+      let conversation = await (this.prisma as any).conversation.findUnique({
         where: {
           botId_threadExternalId: {
             botId,
@@ -303,7 +303,7 @@ export class ZaloListeners {
       if (!conversation) {
         // Fetch group info from ZCA to populate details on create
         const groupInfo = await this.zca.getGroupInfo(botExternalId, String(threadId));
-        conversation = await this.prisma.conversation.create({
+        conversation = await (this.prisma as any).conversation.create({
           data: {
             botId,
             threadType: ThreadType.group,
@@ -320,7 +320,7 @@ export class ZaloListeners {
       if (type === 'join') {
         // Upsert participant records for all members who joined
         for (const member of updateMembers) {
-          await this.prisma.participant.upsert({
+          await (this.prisma as any).participant.upsert({
             where: {
               conversationId_externalId: {
                 conversationId: conversation.id,
@@ -345,7 +345,7 @@ export class ZaloListeners {
         const groupInfo = await this.zca.getGroupInfo(botExternalId, String(threadId));
         if (groupInfo) {
           const metadata = (conversation.metadata as Record<string, any>) || {};
-          await this.prisma.conversation.update({
+          await (this.prisma as any).conversation.update({
             where: { id: conversation.id },
             data: {
               title: groupInfo.name || undefined,
@@ -361,7 +361,7 @@ export class ZaloListeners {
         // Remove participants from the database
         const memberIds = updateMembers.map((m: any) => String(m.id));
         if (memberIds.length > 0) {
-          await this.prisma.participant.deleteMany({
+          await (this.prisma as any).participant.deleteMany({
             where: {
               conversationId: conversation.id,
               externalId: { in: memberIds },
@@ -374,7 +374,7 @@ export class ZaloListeners {
         if (isBotRemoved) {
           this.logger.warn(`Bot ${botId} (${botExternalId}) was removed from or left group ${threadId}`);
           const metadata = (conversation.metadata as Record<string, any>) || {};
-          await this.prisma.conversation.update({
+          await (this.prisma as any).conversation.update({
             where: { id: conversation.id },
             data: {
               metadata: {
@@ -389,7 +389,7 @@ export class ZaloListeners {
           const groupInfo = await this.zca.getGroupInfo(botExternalId, String(threadId));
           if (groupInfo) {
             const metadata = (conversation.metadata as Record<string, any>) || {};
-            await this.prisma.conversation.update({
+            await (this.prisma as any).conversation.update({
               where: { id: conversation.id },
               data: {
                 title: groupInfo.name || undefined,
@@ -402,12 +402,68 @@ export class ZaloListeners {
             });
           }
         }
+      } else if (type === 'new_pin_topic' || type === 'update_pin_topic') {
+        const topic = event.data?.topic;
+        if (topic) {
+          const metadata = (conversation.metadata as Record<string, any>) || {};
+          let pinnedMessages = metadata.pinnedMessages || [];
+          pinnedMessages = pinnedMessages.filter((t: any) => t.id !== topic.id);
+          pinnedMessages.push(topic);
+          await (this.prisma as any).conversation.update({
+            where: { id: conversation.id },
+            data: {
+              metadata: {
+                ...metadata,
+                pinnedMessages,
+              },
+            },
+          });
+        }
+      } else if (type === 'unpin_topic') {
+        const topic = event.data?.topic;
+        if (topic) {
+          const metadata = (conversation.metadata as Record<string, any>) || {};
+          let pinnedMessages = metadata.pinnedMessages || [];
+          pinnedMessages = pinnedMessages.filter((t: any) => t.id !== topic.id);
+          await (this.prisma as any).conversation.update({
+            where: { id: conversation.id },
+            data: {
+              metadata: {
+                ...metadata,
+                pinnedMessages,
+              },
+            },
+          });
+        }
+      } else if (type === 'reorder_pin_topic') {
+        const topicsOrder = event.data?.topics || [];
+        const metadata = (conversation.metadata as Record<string, any>) || {};
+        const pinnedMessages = metadata.pinnedMessages || [];
+        const ordered = [];
+        for (const orderItem of topicsOrder) {
+          const found = pinnedMessages.find((t: any) => t.id === orderItem.topicId);
+          if (found) ordered.push(found);
+        }
+        for (const t of pinnedMessages) {
+          if (!ordered.find((o: any) => o.id === t.id)) {
+            ordered.push(t);
+          }
+        }
+        await (this.prisma as any).conversation.update({
+          where: { id: conversation.id },
+          data: {
+            metadata: {
+              ...metadata,
+              pinnedMessages: ordered,
+            },
+          },
+        });
       } else {
         // For other update events (title, setting, avt, etc.), sync group info
         const groupInfo = await this.zca.getGroupInfo(botExternalId, String(threadId));
         if (groupInfo) {
           const metadata = (conversation.metadata as Record<string, any>) || {};
-          await this.prisma.conversation.update({
+          await (this.prisma as any).conversation.update({
             where: { id: conversation.id },
             data: {
               title: groupInfo.name || undefined,
@@ -450,7 +506,7 @@ export class ZaloListeners {
       }
 
       // 1. Resolve bot & customer
-      const bot = await this.prisma.bot.findUnique({
+      const bot = await (this.prisma as any).bot.findUnique({
         where: { id: botId },
         select: { customerId: true },
       });
@@ -460,7 +516,7 @@ export class ZaloListeners {
       }
 
       // 2. Find message in DB
-      const message = await this.prisma.message.findFirst({
+      const message = await (this.prisma as any).message.findFirst({
         where: {
           conversation: { botId },
           messageExternalId: String(msgId),
@@ -470,7 +526,7 @@ export class ZaloListeners {
       if (message) {
         this.logger.log(`[handleUndo] Found message ID=${message.id} (externalId=${msgId}), marking as recalled`);
         const rawObj = (message.raw as Record<string, any>) || {};
-        await this.prisma.message.update({
+        await (this.prisma as any).message.update({
           where: { id: message.id },
           data: {
             raw: {
