@@ -1,6 +1,7 @@
 import { Logger, UnauthorizedException } from '@nestjs/common';
 import {
   ConnectedSocket,
+  MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
   OnGatewayInit,
@@ -13,6 +14,7 @@ import { Server, Socket } from 'socket.io';
 import { PrismaService } from '@/shared/prisma/prisma.service';
 import { AppConfig } from '@/shared/config/app.config';
 import { REALTIME_NAMESPACE } from '@/shared/types';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 interface SocketData {
   customerId?: number;
@@ -34,6 +36,7 @@ export class RealtimeGateway
     private readonly jwt: JwtService,
     private readonly config: AppConfig,
     private readonly prisma: PrismaService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   afterInit(): void {
@@ -75,10 +78,28 @@ export class RealtimeGateway
   @SubscribeMessage('session:subscribe')
   async subscribeSession(
     @ConnectedSocket() socket: Socket,
-    payload: { sessionId: string },
+    @MessageBody() payload: { sessionId: string },
   ): Promise<void> {
     if (!payload?.sessionId) return;
     await socket.join(`session:${payload.sessionId}`);
+  }
+
+  @SubscribeMessage('agent:typing')
+  async handleAgentTyping(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: { botExternalId: string; threadId: string; threadType: 'user' | 'group'; isTyping: boolean },
+  ): Promise<void> {
+    const customerId = (socket.data as SocketData).customerId;
+    if (!customerId) return;
+
+    this.logger.debug(`Agent typing: customerId=${customerId} bot=${payload.botExternalId} threadId=${payload.threadId} typing=${payload.isTyping}`);
+    this.eventEmitter.emit('agent.typing', {
+      customerId,
+      botExternalId: payload.botExternalId,
+      threadId: payload.threadId,
+      threadType: payload.threadType,
+      isTyping: payload.isTyping,
+    });
   }
 
   // ---- emit helpers ----

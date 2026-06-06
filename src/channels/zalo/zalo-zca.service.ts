@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ZaloInstanceRegistry } from './zalo-instance.registry';
 import { RedisService } from '@/shared/redis/redis.service';
+import { PrismaService } from '@/shared/prisma/prisma.service';
 import { Buffer } from 'buffer';
 
 export type ZaloUserProfile = {
@@ -18,6 +19,7 @@ export class ZaloZcaService {
   constructor(
     private readonly instances: ZaloInstanceRegistry,
     private readonly redis: RedisService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async getUserProfile(
@@ -259,6 +261,8 @@ export class ZaloZcaService {
       onClosed: (code: any) => Promise<void> | void;
       onFriendEvent?: (event: any) => Promise<void> | void;
       onReaction?: (reaction: any) => Promise<void> | void;
+      onGroupEvent?: (event: any) => Promise<void> | void;
+      onUndo?: (event: any) => Promise<void> | void;
     },
   ): void {
     const api = this.instances.get(botExternalId) as {
@@ -285,6 +289,16 @@ export class ZaloZcaService {
     api.listener.on?.('reaction', (reaction: unknown) => {
       if (callbacks.onReaction) {
         void callbacks.onReaction(reaction);
+      }
+    });
+    api.listener.on?.('group_event', (event: unknown) => {
+      if (callbacks.onGroupEvent) {
+        void callbacks.onGroupEvent(event);
+      }
+    });
+    api.listener.on?.('undo', (event: unknown) => {
+      if (callbacks.onUndo) {
+        void callbacks.onUndo(event);
       }
     });
   }
@@ -339,13 +353,174 @@ export class ZaloZcaService {
       throw new Error(`addReaction not supported by bot: ${botExternalId}`);
     }
 
-    return api.addReaction(reactIcon, {
-      data: {
-        msgId: messageExternalId,
-        cliMsgId: '',
-      },
+    // Resolve msgId and cliMsgId based on message in DB
+    let msgId = messageExternalId;
+    let cliMsgId = '0';
+
+    try {
+      const bot = await this.prisma.bot.findUnique({
+        where: { channel_externalId: { channel: 'zalo', externalId: botExternalId } },
+        select: { id: true },
+      });
+      if (bot) {
+        const conversation = await this.prisma.conversation.findFirst({
+          where: { botId: bot.id, threadExternalId: threadId },
+          select: { id: true },
+        });
+        if (conversation) {
+          const message = await this.prisma.message.findUnique({
+            where: {
+              conversationId_messageExternalId: {
+                conversationId: conversation.id,
+                messageExternalId,
+              },
+            },
+          });
+          if (message) {
+            if (message.direction === 'out') {
+              // Outbound message: we need its original cliMsgId
+              msgId = '0';
+              if (message.raw && typeof message.raw === 'object') {
+                const raw = message.raw as any;
+                const data = raw.data || {};
+                cliMsgId = String(raw.cliMsgId || data.cliMsgId || '0');
+              }
+              if (cliMsgId === '0' || !cliMsgId) {
+                // Fallback to createdAt timestamp as client ID representation
+                cliMsgId = String(message.createdAt.getTime());
+              }
+            } else {
+              // Inbound message: msgId is global message ID, cliMsgId is '0'
+              msgId = messageExternalId;
+              cliMsgId = '0';
+            }
+          }
+        }
+      }
+    } catch (dbErr) {
+      console.warn(`[ZaloZcaService.addReaction] Error querying DB for message:`, dbErr);
+    }
+
+    console.log(`[ZaloZcaService.addReaction] Calling ZCA addReaction:`, {
+      reactIcon,
+      messageExternalId,
+      msgId,
+      cliMsgId,
       threadId,
-      type: threadType,
+      threadType,
     });
+
+    try {
+      const res = await api.addReaction(reactIcon, {
+        data: {
+          msgId,
+          cliMsgId,
+        },
+        threadId,
+        type: threadType,
+      });
+      console.log(`[ZaloZcaService.addReaction] ZCA addReaction result:`, res);
+      return res;
+    } catch (err) {
+      console.error(`[ZaloZcaService.addReaction] ZCA addReaction error:`, err);
+      throw err;
+    }
+  }
+
+  async undo(
+    botExternalId: string,
+    messageExternalId: string,
+    threadId: string,
+    threadType: number,
+  ): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api || typeof api.undo !== 'function') {
+      throw new Error(`undo not supported by bot: ${botExternalId}`);
+    }
+
+    let msgId = messageExternalId;
+    let cliMsgId = '0';
+
+    try {
+      const bot = await this.prisma.bot.findUnique({
+        where: { channel_externalId: { channel: 'zalo', externalId: botExternalId } },
+        select: { id: true },
+      });
+      if (bot) {
+        const conversation = await this.prisma.conversation.findFirst({
+          where: { botId: bot.id, threadExternalId: threadId },
+          select: { id: true },
+        });
+        if (conversation) {
+          const message = await this.prisma.message.findUnique({
+            where: {
+              conversationId_messageExternalId: {
+                conversationId: conversation.id,
+                messageExternalId,
+              },
+            },
+          });
+          if (message) {
+            msgId = messageExternalId;
+            if (message.direction === 'out') {
+              if (message.raw && typeof message.raw === 'object') {
+                const raw = message.raw as any;
+                const data = raw.data || {};
+                cliMsgId = String(raw.cliMsgId || data.cliMsgId || '0');
+              }
+              if (cliMsgId === '0' || !cliMsgId) {
+                cliMsgId = String(message.createdAt.getTime());
+              }
+            } else {
+              cliMsgId = '0';
+            }
+          }
+        }
+      }
+    } catch (dbErr) {
+      console.warn(`[ZaloZcaService.undo] Error querying DB for message:`, dbErr);
+    }
+
+    console.log(`[ZaloZcaService.undo] Calling ZCA undo:`, {
+      msgId,
+      cliMsgId,
+      threadId,
+      threadType,
+    });
+
+    try {
+      const res = await api.undo(
+        {
+          msgId,
+          cliMsgId,
+        },
+        threadId,
+        threadType,
+      );
+      return res;
+    } catch (err) {
+      console.error(`[ZaloZcaService.undo] ZCA error:`, err);
+      throw err;
+    }
+  }
+
+  async sendTypingEvent(
+    botExternalId: string,
+    threadId: string,
+    threadType: number,
+    isTyping: boolean,
+  ): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api || typeof api.sendTypingEvent !== 'function') {
+      console.warn(`sendTypingEvent not supported by bot: ${botExternalId}`);
+      return null;
+    }
+
+    try {
+      return await api.sendTypingEvent(threadId, threadType, isTyping);
+    } catch (err) {
+      console.error(`[ZaloZcaService.sendTypingEvent] ZCA error:`, err);
+      return null;
+    }
   }
 }

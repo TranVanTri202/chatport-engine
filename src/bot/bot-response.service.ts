@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { OnEvent } from '@nestjs/event-emitter';
+import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter';
 import { Bot } from '@prisma/client';
 import { ChannelType, MessageType, ThreadType } from '@/shared/types';
 import { AppConfig } from '@/shared/config/app.config';
@@ -39,6 +39,7 @@ export class BotResponseService {
     private readonly config: AppConfig,
     private readonly policy: ReplyPolicyService,
     private readonly quota: QuotaService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   private isWithinActiveHours(hoursStr: string | null): boolean {
@@ -99,6 +100,15 @@ export class BotResponseService {
       return;
     }
 
+    if (bot.channel === 'zalo') {
+      this.eventEmitter.emit('bot.typing', {
+        botExternalId: bot.externalId,
+        threadId: conversation.threadExternalId,
+        threadType: conversation.threadType,
+        isTyping: true,
+      });
+    }
+
     try {
       const userText = inbound.text!.trim();
       const result = await this.generateReply(bot, conversation, userText);
@@ -121,6 +131,15 @@ export class BotResponseService {
         return;
       }
       throw err;
+    } finally {
+      if (bot.channel === 'zalo') {
+        this.eventEmitter.emit('bot.typing', {
+          botExternalId: bot.externalId,
+          threadId: conversation.threadExternalId,
+          threadType: conversation.threadType,
+          isTyping: false,
+        });
+      }
     }
   }
 

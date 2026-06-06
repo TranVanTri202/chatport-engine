@@ -15,6 +15,7 @@ export class MessageRepository {
     text: string | null;
     attachments: Prisma.InputJsonValue;
     quoteOfExternalId: string | null;
+    raw?: Prisma.InputJsonValue;
   }): Promise<Message> {
     return this.prisma.message.upsert({
       where: {
@@ -32,6 +33,7 @@ export class MessageRepository {
         text: input.text,
         attachments: input.attachments,
         quoteOfExternalId: input.quoteOfExternalId,
+        raw: input.raw ?? undefined,
       },
       update: {},
     });

@@ -2,9 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import {
   BotStatusChangedEvent,
+  ConversationUpdatedEvent,
   DOMAIN_EVENTS,
   DocumentStatusChangedEvent,
   MessageReactedEvent,
+  MessageRecalledEvent,
   MessageReceivedEvent,
   MessageSentEvent,
 } from '@/shared/events/domain-events';
@@ -24,6 +26,7 @@ export class RealtimeListener {
     this.gateway.emitToCustomer(e.bot.customerId, 'message:new', {
       conversationId: e.conversation.id,
       messageId: e.messageId,
+      messageExternalId: e.inbound.messageExternalId,
       direction: e.inbound.isSelf ? 'out' : 'in',
       text: e.inbound.text,
       attachments: e.inbound.attachments,
@@ -72,4 +75,21 @@ export class RealtimeListener {
       reactions: e.reactions,
     });
   }
+
+  @OnEvent(DOMAIN_EVENTS.ConversationUpdated)
+  onConversationUpdated(e: ConversationUpdatedEvent): void {
+    this.gateway.emitToCustomer(e.customerId, 'message:new', {
+      conversationId: e.conversationId,
+      messageId: 'group-update-' + Date.now(),
+    });
+  }
+
+  @OnEvent(DOMAIN_EVENTS.MessageRecalled)
+  onRecalled(e: MessageRecalledEvent): void {
+    this.gateway.emitToCustomer(e.customerId, 'message:recalled', {
+      conversationId: e.conversationId,
+      messageExternalId: e.messageExternalId,
+    });
+  }
 }
+

@@ -41,6 +41,7 @@ export class MessageService {
       text: msg.text ?? null,
       attachments: msg.attachments as unknown as Prisma.InputJsonValue,
       quoteOfExternalId: msg.quote?.messageExternalId ?? null,
+      raw: msg.raw as any,
     });
   }
 

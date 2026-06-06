@@ -16,7 +16,11 @@ import { LlmService } from '@/llm/llm.service';
 import { AppConfig } from '@/shared/config/app.config';
 import { BotResponseService } from '@/bot/bot-response.service';
 import { ReactMessageDto } from './dto/react-message.dto';
+import { RecallMessageDto } from './dto/recall-message.dto';
 import { ZaloZcaService } from '@/channels/zalo/zalo-zca.service';
+import { PrismaService } from '@/shared/prisma/prisma.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { DOMAIN_EVENTS } from '@/shared/events/domain-events';
 
 
 @ApiTags('messages')
@@ -33,6 +37,8 @@ export class MessagesController {
     private readonly config: AppConfig,
     private readonly botResponse: BotResponseService,
     private readonly zaloZca: ZaloZcaService,
+    private readonly prisma: PrismaService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   @Post('send/text')
@@ -97,6 +103,17 @@ export class MessagesController {
       body.threadType === 'group' ? 1 : 0,
       body.messageExternalId,
       body.reactIcon,
+    );
+    return { success: true };
+  }
+
+  @Post('recall')
+  async recallMessage(@Body() body: RecallMessageDto) {
+    await this.zaloZca.undo(
+      body.botExternalId,
+      body.messageExternalId,
+      body.threadId,
+      body.threadType === 'group' ? 1 : 0,
     );
     return { success: true };
   }

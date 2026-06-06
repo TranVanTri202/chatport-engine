@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { BotStatus } from '@prisma/client';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
+import { BotStatus, ThreadType } from '@prisma/client';
 import { MessagingPublisher } from '@/messaging/messaging.publisher';
 import { PrismaService } from '@/shared/prisma/prisma.service';
 import { DOMAIN_EVENTS } from '@/shared/events/domain-events';
@@ -43,6 +43,12 @@ export class ZaloListeners {
       },
       onReaction: async (reaction) => {
         await this.handleReaction(botId, botExternalId, reaction);
+      },
+      onGroupEvent: async (event) => {
+        await this.handleGroupEvent(botId, botExternalId, event);
+      },
+      onUndo: async (event) => {
+        await this.handleUndo(botId, botExternalId, event);
       },
     });
 
@@ -152,11 +158,11 @@ export class ZaloListeners {
     botExternalId: string,
     event: any,
   ): Promise<void> {
-    this.logger.log(`Received Zalo reaction_event: msgId=${event?.data?.content?.rMsg?.[0]?.gMsgID} for botId=${botId}`);
+    this.logger.log(`Received Zalo reaction_event: msgId=${event?.data?.content?.rMsg?.[0]?.gMsgID} event: ${JSON.stringify(event)}`);
     try {
       const gMsg = event?.data?.content?.rMsg?.[0];
-      const messageExternalId = gMsg?.gMsgID ? String(gMsg.gMsgID) : null;
-      if (!messageExternalId) return;
+      const gMsgID = gMsg?.gMsgID ? String(gMsg.gMsgID) : null;
+      const cMsgID = gMsg?.cMsgID ? String(gMsg.cMsgID) : null;
 
       const threadId = event?.threadId;
       if (!threadId) return;
@@ -180,14 +186,36 @@ export class ZaloListeners {
       if (!conversation) return;
 
       // 3. Find message by conversationId and messageExternalId
-      const message = await this.prisma.message.findUnique({
-        where: {
-          conversationId_messageExternalId: {
-            conversationId: conversation.id,
-            messageExternalId,
+      let message = null;
+      if (gMsgID && gMsgID !== '0') {
+        message = await this.prisma.message.findUnique({
+          where: {
+            conversationId_messageExternalId: {
+              conversationId: conversation.id,
+              messageExternalId: gMsgID,
+            },
           },
-        },
-      });
+        });
+      }
+
+      if (!message && cMsgID) {
+        // Fallback: search by createdAt timestamp close to cMsgID (within 2 seconds)
+        const cMsgTime = new Date(Number(cMsgID));
+        const startTime = new Date(cMsgTime.getTime() - 2000);
+        const endTime = new Date(cMsgTime.getTime() + 2000);
+
+        message = await this.prisma.message.findFirst({
+          where: {
+            conversationId: conversation.id,
+            createdAt: {
+              gte: startTime,
+              lte: endTime,
+            },
+          },
+          orderBy: { createdAt: 'asc' },
+        });
+      }
+
       if (!message) return;
 
       // Parse existing reactions
@@ -232,12 +260,292 @@ export class ZaloListeners {
       this.eventEmitter.emit(DOMAIN_EVENTS.MessageReacted, {
         customerId: bot.customerId,
         conversationId: conversation.id,
-        messageExternalId,
+        messageExternalId: message.messageExternalId,
         reactions: reactionsList,
       });
 
     } catch (error) {
       this.logger.error(`Error handling reaction_event for botId=${botId}: ${(error as Error).message}`);
+    }
+  }
+
+  /** Handle real-time group join/leave/update events from Zalo */
+  protected async handleGroupEvent(
+    botId: number,
+    botExternalId: string,
+    event: any,
+  ): Promise<void> {
+    this.logger.log(`Received Zalo group_event: type=${event?.type} threadId=${event?.threadId}`);
+    try {
+      const threadId = event?.threadId;
+      if (!threadId) return;
+
+      const type = event?.type;
+      const updateMembers = event?.data?.updateMembers || [];
+
+      // 1. Resolve bot & customer
+      const bot = await this.prisma.bot.findUnique({
+        where: { id: botId },
+        select: { customerId: true },
+      });
+      if (!bot) return;
+
+      // 2. Find or create the conversation
+      let conversation = await this.prisma.conversation.findUnique({
+        where: {
+          botId_threadExternalId: {
+            botId,
+            threadExternalId: String(threadId),
+          },
+        },
+      });
+
+      if (!conversation) {
+        // Fetch group info from ZCA to populate details on create
+        const groupInfo = await this.zca.getGroupInfo(botExternalId, String(threadId));
+        conversation = await this.prisma.conversation.create({
+          data: {
+            botId,
+            threadType: ThreadType.group,
+            threadExternalId: String(threadId),
+            title: groupInfo?.name || 'Zalo Group',
+            avatar: groupInfo?.avt || null,
+            unread: 0,
+            metadata: groupInfo ? { memberCount: groupInfo.totalMember } : {},
+          },
+        });
+      }
+
+      // 3. Process the event type
+      if (type === 'join') {
+        // Upsert participant records for all members who joined
+        for (const member of updateMembers) {
+          await this.prisma.participant.upsert({
+            where: {
+              conversationId_externalId: {
+                conversationId: conversation.id,
+                externalId: String(member.id),
+              },
+            },
+            create: {
+              conversationId: conversation.id,
+              externalId: String(member.id),
+              displayName: member.dName || 'Zalo Member',
+              avatar: member.avatar || null,
+              isBot: String(member.id) === botExternalId,
+            },
+            update: {
+              displayName: member.dName || undefined,
+              avatar: member.avatar || undefined,
+            },
+          });
+        }
+
+        // Fetch updated group details (title, avt, totalMember)
+        const groupInfo = await this.zca.getGroupInfo(botExternalId, String(threadId));
+        if (groupInfo) {
+          const metadata = (conversation.metadata as Record<string, any>) || {};
+          await this.prisma.conversation.update({
+            where: { id: conversation.id },
+            data: {
+              title: groupInfo.name || undefined,
+              avatar: groupInfo.avt || undefined,
+              metadata: {
+                ...metadata,
+                memberCount: groupInfo.totalMember,
+              },
+            },
+          });
+        }
+      } else if (type === 'leave' || type === 'remove_member' || type === 'block_member') {
+        // Remove participants from the database
+        const memberIds = updateMembers.map((m: any) => String(m.id));
+        if (memberIds.length > 0) {
+          await this.prisma.participant.deleteMany({
+            where: {
+              conversationId: conversation.id,
+              externalId: { in: memberIds },
+            },
+          });
+        }
+
+        // Check if the bot itself was removed or left the group
+        const isBotRemoved = memberIds.includes(botExternalId);
+        if (isBotRemoved) {
+          this.logger.warn(`Bot ${botId} (${botExternalId}) was removed from or left group ${threadId}`);
+          const metadata = (conversation.metadata as Record<string, any>) || {};
+          await this.prisma.conversation.update({
+            where: { id: conversation.id },
+            data: {
+              metadata: {
+                ...metadata,
+                isBotParticipant: false,
+                memberCount: 0,
+              },
+            },
+          });
+        } else {
+          // Sync group info
+          const groupInfo = await this.zca.getGroupInfo(botExternalId, String(threadId));
+          if (groupInfo) {
+            const metadata = (conversation.metadata as Record<string, any>) || {};
+            await this.prisma.conversation.update({
+              where: { id: conversation.id },
+              data: {
+                title: groupInfo.name || undefined,
+                avatar: groupInfo.avt || undefined,
+                metadata: {
+                  ...metadata,
+                  memberCount: groupInfo.totalMember,
+                },
+              },
+            });
+          }
+        }
+      } else {
+        // For other update events (title, setting, avt, etc.), sync group info
+        const groupInfo = await this.zca.getGroupInfo(botExternalId, String(threadId));
+        if (groupInfo) {
+          const metadata = (conversation.metadata as Record<string, any>) || {};
+          await this.prisma.conversation.update({
+            where: { id: conversation.id },
+            data: {
+              title: groupInfo.name || undefined,
+              avatar: groupInfo.avt || undefined,
+              metadata: {
+                ...metadata,
+                memberCount: groupInfo.totalMember,
+              },
+            },
+          });
+        }
+      }
+
+      // 4. Emit the domain event to notify components/sockets
+      this.eventEmitter.emit(DOMAIN_EVENTS.ConversationUpdated, {
+        customerId: bot.customerId,
+        conversationId: conversation.id,
+      });
+
+    } catch (error) {
+      this.logger.error(`Error handling group_event for botId=${botId}: ${(error as Error).message}`);
+    }
+  }
+
+  /** Handle real-time message undo (recall) event from Zalo */
+  async handleUndo(
+    botId: number,
+    botExternalId: string,
+    event: any,
+  ): Promise<void> {
+    this.logger.log(`Received Zalo undo event: msgId=${event?.data?.msgId} threadId=${event?.threadId} event=${JSON.stringify(event)}`);
+    try {
+      const msgId = event?.data?.content?.globalMsgId
+        ? String(event.data.content.globalMsgId)
+        : (event?.data?.msgId ? String(event.data.msgId) : undefined);
+
+      if (!msgId) {
+        this.logger.warn(`[handleUndo] No msgId or globalMsgId found in event data`);
+        return;
+      }
+
+      // 1. Resolve bot & customer
+      const bot = await this.prisma.bot.findUnique({
+        where: { id: botId },
+        select: { customerId: true },
+      });
+      if (!bot) {
+        this.logger.warn(`[handleUndo] Bot not found for botId=${botId}`);
+        return;
+      }
+
+      // 2. Find message in DB
+      const message = await this.prisma.message.findFirst({
+        where: {
+          conversation: { botId },
+          messageExternalId: String(msgId),
+        },
+      });
+
+      if (message) {
+        this.logger.log(`[handleUndo] Found message ID=${message.id} (externalId=${msgId}), marking as recalled`);
+        const rawObj = (message.raw as Record<string, any>) || {};
+        await this.prisma.message.update({
+          where: { id: message.id },
+          data: {
+            raw: {
+              ...rawObj,
+              isRecalled: true,
+              recalledAt: new Date().toISOString(),
+            },
+          },
+        });
+
+        // 3. Emit MessageRecalled domain event
+        this.eventEmitter.emit(DOMAIN_EVENTS.MessageRecalled, {
+          customerId: bot.customerId,
+          conversationId: message.conversationId,
+          messageExternalId: String(msgId),
+        });
+      } else {
+        this.logger.warn(`[handleUndo] Message not found in DB for messageExternalId=${msgId} botId=${botId}`);
+      }
+    } catch (error) {
+      this.logger.error(`Error handling undo event for botId=${botId}: ${(error as Error).message}`);
+    }
+  }
+
+  @OnEvent('agent.typing')
+  async onAgentTyping(payload: {
+    customerId: number;
+    botExternalId: string;
+    threadId: string;
+    threadType: 'user' | 'group';
+    isTyping: boolean;
+  }): Promise<void> {
+    this.logger.debug(`ZaloListeners: agent.typing received for bot=${payload.botExternalId} thread=${payload.threadId} typing=${payload.isTyping}`);
+    try {
+      // Verify bot belongs to customer
+      const bot = await this.prisma.bot.findFirst({
+        where: {
+          externalId: payload.botExternalId,
+          customerId: payload.customerId,
+          channel: 'zalo',
+        },
+        select: { id: true },
+      });
+      if (!bot) return;
+
+      const threadTypeNum = payload.threadType === 'group' ? 1 : 0;
+      await this.zca.sendTypingEvent(
+        payload.botExternalId,
+        payload.threadId,
+        threadTypeNum,
+        payload.isTyping,
+      );
+    } catch (err) {
+      this.logger.error(`Error handling agent.typing: ${(err as Error).message}`);
+    }
+  }
+
+  @OnEvent('bot.typing')
+  async onBotTyping(payload: {
+    botExternalId: string;
+    threadId: string;
+    threadType: string;
+    isTyping: boolean;
+  }): Promise<void> {
+    this.logger.debug(`ZaloListeners: bot.typing received for bot=${payload.botExternalId} thread=${payload.threadId} typing=${payload.isTyping}`);
+    try {
+      const threadTypeNum = payload.threadType === 'group' ? 1 : 0;
+      await this.zca.sendTypingEvent(
+        payload.botExternalId,
+        payload.threadId,
+        threadTypeNum,
+        payload.isTyping,
+      );
+    } catch (err) {
+      this.logger.error(`Error handling bot.typing: ${(err as Error).message}`);
     }
   }
 }

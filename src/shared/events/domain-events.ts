@@ -31,6 +31,12 @@ export const DOMAIN_EVENTS = {
 
   /** Message reaction added/updated. */
   MessageReacted: 'message.reacted',
+
+  /** Conversation updated (e.g. metadata, title, members). */
+  ConversationUpdated: 'conversation.updated',
+
+  /** Message recalled/undone. */
+  MessageRecalled: 'message.recalled',
 } as const;
 
 export interface MessageReceivedEvent {
@@ -69,3 +75,15 @@ export interface MessageReactedEvent {
   messageExternalId: string;
   reactions: Array<{ userId: string; userName: string; reaction: string }>;
 }
+
+export interface ConversationUpdatedEvent {
+  customerId: number;
+  conversationId: number;
+}
+
+export interface MessageRecalledEvent {
+  customerId: number;
+  conversationId: number;
+  messageExternalId: string;
+}
+
