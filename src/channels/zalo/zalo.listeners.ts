@@ -118,13 +118,67 @@ export class ZaloListeners {
             isFriend: true,
           },
         });
+
+        const conversation = await this.prisma.conversation.findFirst({
+          where: { botId, threadExternalId: friendUid },
+        });
+        if (conversation) {
+          const profileName = profile?.displayName || 'Zalo Friend';
+          await this.publisher.publishInbound({
+            channel: 'zalo' as any,
+            botExternalId,
+            threadId: friendUid,
+            threadType: 'user' as any,
+            senderExternalId: friendUid,
+            senderName: profileName,
+            messageExternalId: `friend_add_${friendUid}_${Date.now()}`,
+            timestamp: Date.now(),
+            type: 'unknown' as any,
+            text: `Bạn và ${profileName} đã trở thành bạn bè.`,
+            attachments: [],
+            isSelf: false,
+            raw: {
+              isFriendEvent: true,
+              eventType: 'add',
+            },
+          });
+        }
       } else if (type === 1) { // REMOVE
         const friendUid = event.data as string;
         this.logger.log(`Friend removed: ${friendUid}`);
+        const contact = await this.prisma.contact.findFirst({
+          where: { botId, externalId: friendUid },
+        });
+        const friendName = contact?.name || 'Zalo Friend';
+
         await this.prisma.contact.updateMany({
           where: { botId, externalId: friendUid },
           data: { isFriend: false },
         });
+
+        const conversation = await this.prisma.conversation.findFirst({
+          where: { botId, threadExternalId: friendUid },
+        });
+        if (conversation) {
+          await this.publisher.publishInbound({
+            channel: 'zalo' as any,
+            botExternalId,
+            threadId: friendUid,
+            threadType: 'user' as any,
+            senderExternalId: friendUid,
+            senderName: friendName,
+            messageExternalId: `friend_remove_${friendUid}_${Date.now()}`,
+            timestamp: Date.now(),
+            type: 'unknown' as any,
+            text: `Bạn và ${friendName} đã hủy kết bạn.`,
+            attachments: [],
+            isSelf: false,
+            raw: {
+              isFriendEvent: true,
+              eventType: 'remove',
+            },
+          });
+        }
       } else if (type === 2) { // REQUEST
         const reqData = event.data as { fromUid: string; message: string };
         const senderUid = reqData.fromUid;
@@ -153,6 +207,66 @@ export class ZaloListeners {
         await this.prisma.friendRequest.deleteMany({
           where: { botId, externalId: senderUid },
         });
+      } else if (type === 6) { // BLOCK
+        const friendUid = event.data as string;
+        this.logger.log(`Friend blocked: ${friendUid}`);
+        const conversation = await this.prisma.conversation.findFirst({
+          where: { botId, threadExternalId: friendUid },
+        });
+        if (conversation) {
+          const contact = await this.prisma.contact.findFirst({
+            where: { botId, externalId: friendUid },
+          });
+          const friendName = contact?.name || 'Zalo Friend';
+          await this.publisher.publishInbound({
+            channel: 'zalo' as any,
+            botExternalId,
+            threadId: friendUid,
+            threadType: 'user' as any,
+            senderExternalId: friendUid,
+            senderName: friendName,
+            messageExternalId: `friend_block_${friendUid}_${Date.now()}`,
+            timestamp: Date.now(),
+            type: 'unknown' as any,
+            text: `Bạn đã chặn ${friendName}.`,
+            attachments: [],
+            isSelf: false,
+            raw: {
+              isFriendEvent: true,
+              eventType: 'block',
+            },
+          });
+        }
+      } else if (type === 7) { // UNBLOCK
+        const friendUid = event.data as string;
+        this.logger.log(`Friend unblocked: ${friendUid}`);
+        const conversation = await this.prisma.conversation.findFirst({
+          where: { botId, threadExternalId: friendUid },
+        });
+        if (conversation) {
+          const contact = await this.prisma.contact.findFirst({
+            where: { botId, externalId: friendUid },
+          });
+          const friendName = contact?.name || 'Zalo Friend';
+          await this.publisher.publishInbound({
+            channel: 'zalo' as any,
+            botExternalId,
+            threadId: friendUid,
+            threadType: 'user' as any,
+            senderExternalId: friendUid,
+            senderName: friendName,
+            messageExternalId: `friend_unblock_${friendUid}_${Date.now()}`,
+            timestamp: Date.now(),
+            type: 'unknown' as any,
+            text: `Bạn đã bỏ chặn ${friendName}.`,
+            attachments: [],
+            isSelf: false,
+            raw: {
+              isFriendEvent: true,
+              eventType: 'unblock',
+            },
+          });
+        }
       } else if (type === 10 || type === 11) { // 1-to-1 chat Pin/Unpin event (10 is unpin, 11 can be pin/unpin depending on action)
         const topic = event.data?.topic;
         const threadId = event.threadId || event.data?.conversationId;
