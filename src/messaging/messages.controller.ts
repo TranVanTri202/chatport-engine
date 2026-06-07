@@ -6,6 +6,7 @@ import { IsEnum, IsOptional, IsString } from 'class-validator';
 import { SendMessageCommand } from './commands/send-message.command';
 import { SendTextMessageDto } from './dto/send-text-message.dto';
 import { SendImageFileDto } from './dto/send-image-file.dto';
+import { SendVoiceFileDto, SendVideoFileDto, SendGeneralFileDto } from './dto/send-media-file.dto';
 import { InboundMessageDto } from './dto/inbound-message.dto';
 import { ChannelType, MessageDirection, MessageType, ThreadType } from '@/shared/types';
 import { BotService } from '@/bot/bot.service';
@@ -111,6 +112,119 @@ export class MessagesController {
         threadType: body.threadType,
         type: MessageType.image,
         text: body.caption,
+        attachments: [
+          {
+            url: `data:${file.mimetype};name=${encodeURIComponent(file.originalname)};base64,${file.buffer.toString('base64')}`,
+          },
+        ],
+        quote: body.quoteMessageExternalId ? { messageExternalId: body.quoteMessageExternalId } : undefined,
+      }),
+    );
+  }
+
+  @Post('send/voice')
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['botExternalId', 'threadId', 'threadType', 'file'],
+      properties: {
+        botExternalId: { type: 'string' },
+        threadId: { type: 'string' },
+        threadType: { type: 'string', enum: ['user', 'group'] },
+        quoteMessageExternalId: { type: 'string' },
+        file: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  @UseInterceptors(FileInterceptor('file'))
+  sendVoice(
+    @Body() body: SendVoiceFileDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('file is required');
+    return this.commands.execute(
+      new SendMessageCommand({
+        botExternalId: body.botExternalId,
+        threadId: body.threadId,
+        threadType: body.threadType,
+        type: MessageType.voice,
+        attachments: [
+          {
+            url: `data:${file.mimetype};name=${encodeURIComponent(file.originalname)};base64,${file.buffer.toString('base64')}`,
+          },
+        ],
+        quote: body.quoteMessageExternalId ? { messageExternalId: body.quoteMessageExternalId } : undefined,
+      }),
+    );
+  }
+
+  @Post('send/video')
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['botExternalId', 'threadId', 'threadType', 'file'],
+      properties: {
+        botExternalId: { type: 'string' },
+        threadId: { type: 'string' },
+        threadType: { type: 'string', enum: ['user', 'group'] },
+        caption: { type: 'string' },
+        quoteMessageExternalId: { type: 'string' },
+        file: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  @UseInterceptors(FileInterceptor('file'))
+  sendVideo(
+    @Body() body: SendVideoFileDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('file is required');
+    return this.commands.execute(
+      new SendMessageCommand({
+        botExternalId: body.botExternalId,
+        threadId: body.threadId,
+        threadType: body.threadType,
+        type: MessageType.video,
+        text: body.caption,
+        attachments: [
+          {
+            url: `data:${file.mimetype};name=${encodeURIComponent(file.originalname)};base64,${file.buffer.toString('base64')}`,
+          },
+        ],
+        quote: body.quoteMessageExternalId ? { messageExternalId: body.quoteMessageExternalId } : undefined,
+      }),
+    );
+  }
+
+  @Post('send/file')
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['botExternalId', 'threadId', 'threadType', 'file'],
+      properties: {
+        botExternalId: { type: 'string' },
+        threadId: { type: 'string' },
+        threadType: { type: 'string', enum: ['user', 'group'] },
+        quoteMessageExternalId: { type: 'string' },
+        file: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  @UseInterceptors(FileInterceptor('file'))
+  sendFile(
+    @Body() body: SendGeneralFileDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('file is required');
+    return this.commands.execute(
+      new SendMessageCommand({
+        botExternalId: body.botExternalId,
+        threadId: body.threadId,
+        threadType: body.threadType,
+        type: MessageType.file,
         attachments: [
           {
             url: `data:${file.mimetype};name=${encodeURIComponent(file.originalname)};base64,${file.buffer.toString('base64')}`,

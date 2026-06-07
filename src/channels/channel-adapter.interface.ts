@@ -30,6 +30,7 @@ export type MessageType =
 export interface InboundAttachment {
   type: AttachmentType;
   url?: string;
+  name?: string;
   mime?: string;
   size?: number;
   meta?: Record<string, unknown>;

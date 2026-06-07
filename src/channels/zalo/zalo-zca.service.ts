@@ -304,12 +304,34 @@ export class ZaloZcaService {
     msg: { type: string; text?: string; attachments?: Array<{ url: string; caption?: string }> },
   ): Promise<any> {
     const api = this.instances.get(botExternalId) as {
-      sendMessage?: (payload: Record<string, unknown>, threadId: string, type: number) => Promise<unknown>;
+      sendMessage?: (payload: Record<string, unknown>, threadId: string, type: number) => Promise<any>;
+      sendVoice?: (options: { voiceUrl: string; ttl?: number }, threadId: string, type?: number) => Promise<any>;
+      sendVideo?: (options: { videoUrl: string; msg?: string; ttl?: number }, threadId: string, type?: number) => Promise<any>;
+      uploadAttachment?: (sources: any | any[], threadId: string, type?: number) => Promise<any[]>;
     } | undefined;
 
     if (!api) {
       throw new Error(`Zalo API instance not found for bot: ${botExternalId}`);
     }
+
+    const parseAttachment = (url: string) => {
+      if (url.startsWith('data:')) {
+        const match = url.match(/^data:([^;]+);name=([^;]+);base64,(.+)$/);
+        if (match) {
+          const [, mimeType, encodedName, base64Data] = match;
+          const fileName = decodeURIComponent(encodedName);
+          const buffer = Buffer.from(base64Data, 'base64');
+          return {
+            data: buffer,
+            filename: fileName as `${string}.${string}`,
+            metadata: {
+              totalSize: buffer.length,
+            },
+          };
+        }
+      }
+      return url;
+    };
 
     if (msg.type === 'chat') {
       if (!msg.text?.trim()) {
@@ -321,32 +343,63 @@ export class ZaloZcaService {
         throw new Error('Image attachment is required for image messages');
       }
       const [first] = msg.attachments;
-
-      let attachmentSource: any;
-      if (first.url.startsWith('data:')) {
-        const match = first.url.match(/^data:([^;]+);name=([^;]+);base64,(.+)$/);
-        if (match) {
-          const [, mimeType, encodedName, base64Data] = match;
-          const fileName = decodeURIComponent(encodedName);
-          const buffer = Buffer.from(base64Data, 'base64');
-          attachmentSource = {
-            data: buffer,
-            filename: fileName,
-            metadata: {
-              totalSize: buffer.length,
-            },
-          };
-        } else {
-          attachmentSource = first.url;
-        }
-      } else {
-        attachmentSource = first.url;
-      }
+      const attachmentSource = parseAttachment(first.url);
 
       return api.sendMessage?.(
         {
           msg: first.caption ?? msg.text ?? '',
           attachments: attachmentSource,
+        },
+        threadId,
+        threadType,
+      );
+    } else if (msg.type === 'voice') {
+      if (!msg.attachments?.length) {
+        throw new Error('Voice attachment is required');
+      }
+      const [first] = msg.attachments;
+      const parsed = parseAttachment(first.url);
+
+      if (!api.uploadAttachment || !api.sendVoice) {
+        throw new Error('zca-js sendVoice or uploadAttachment API is not available');
+      }
+
+      const uploadResults = await api.uploadAttachment(parsed, threadId, threadType);
+      if (!uploadResults || uploadResults.length === 0) {
+        throw new Error('Failed to upload voice attachment to Zalo');
+      }
+      const fileUrl = (uploadResults[0] as any).fileUrl;
+
+      return api.sendVoice({ voiceUrl: fileUrl, ttl: 0 }, threadId, threadType);
+    } else if (msg.type === 'video') {
+      if (!msg.attachments?.length) {
+        throw new Error('Video attachment is required');
+      }
+      const [first] = msg.attachments;
+      const parsed = parseAttachment(first.url);
+
+      if (!api.uploadAttachment || !api.sendVideo) {
+        throw new Error('zca-js sendVideo or uploadAttachment API is not available');
+      }
+
+      const uploadResults = await api.uploadAttachment(parsed, threadId, threadType);
+      if (!uploadResults || uploadResults.length === 0) {
+        throw new Error('Failed to upload video attachment to Zalo');
+      }
+      const fileUrl = (uploadResults[0] as any).fileUrl;
+
+      return api.sendVideo({ videoUrl: fileUrl, msg: msg.text || '' }, threadId, threadType);
+    } else if (msg.type === 'file') {
+      if (!msg.attachments?.length) {
+        throw new Error('File attachment is required');
+      }
+      const [first] = msg.attachments;
+      const parsed = parseAttachment(first.url);
+
+      return api.sendMessage?.(
+        {
+          msg: msg.text ?? '',
+          attachments: parsed,
         },
         threadId,
         threadType,

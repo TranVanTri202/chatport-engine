@@ -90,37 +90,123 @@ export class ZaloNormalizer {
     switch (msgType) {
       case 'chat.photo':
         return { attachments: [{ type: 'image', url: href ?? '' }] };
-      case 'chat.video.msg':
+      case 'chat.video.msg': {
+        let duration: number | undefined = undefined;
+        let size: number | undefined = undefined;
+
+        if (typeof c.duration === 'number') {
+          duration = c.duration;
+        }
+
+        if (typeof c.fileSize === 'number') {
+          size = c.fileSize;
+        }
+
+        if (typeof c.params === 'string') {
+          try {
+            const parsed = JSON.parse(c.params);
+            if (parsed && typeof parsed === 'object') {
+              if (parsed.duration && !duration) {
+                duration = Number(parsed.duration);
+              }
+              if (parsed.fileSize && !size) {
+                size = Number(parsed.fileSize);
+              }
+            }
+          } catch (e) {}
+        }
+
         return {
           attachments: [
             {
               type: 'video',
               url: href ?? '',
-              meta: { duration: c.duration },
+              size,
+              meta: duration ? { duration } : undefined,
             },
           ],
         };
+      }
       case 'chat.attach':
+      case 'share.file': {
+        let size: number | undefined = undefined;
+        let mime: string | undefined = undefined;
+
+        if (typeof c.fileSize === 'number') {
+          size = c.fileSize;
+        } else if (typeof c.fileSize === 'string') {
+          size = Number(c.fileSize);
+        }
+
+        if (typeof c.fileType === 'string') {
+          mime = c.fileType;
+        }
+
+        if (typeof c.params === 'string') {
+          try {
+            const parsed = JSON.parse(c.params);
+            if (parsed && typeof parsed === 'object') {
+              if (parsed.fileSize && !size) {
+                size = Number(parsed.fileSize);
+              }
+              if (parsed.fileExt && !mime) {
+                mime = String(parsed.fileExt);
+              }
+            }
+          } catch (e) {}
+        }
+
         return {
           attachments: [
             {
               type: 'file',
               url: href ?? '',
-              mime: typeof c.fileType === 'string' ? c.fileType : undefined,
-              size: typeof c.fileSize === 'number' ? c.fileSize : undefined,
+              name: typeof c.title === 'string' ? c.title : (typeof c.name === 'string' ? c.name : undefined),
+              mime,
+              size,
             },
           ],
         };
-      case 'chat.voice':
+      }
+      case 'chat.voice': {
+        let size: number | undefined = undefined;
+        let duration: number | undefined = undefined;
+
+        if (typeof c.fileSize === 'number') {
+          size = c.fileSize;
+        } else if (typeof c.fileSize === 'string') {
+          size = Number(c.fileSize);
+        }
+
+        if (typeof c.duration === 'number') {
+          duration = c.duration;
+        }
+
+        if (typeof c.params === 'string') {
+          try {
+            const parsed = JSON.parse(c.params);
+            if (parsed && typeof parsed === 'object') {
+              if (parsed.fileSize && !size) {
+                size = Number(parsed.fileSize);
+              }
+              if (parsed.duration && !duration) {
+                duration = Number(parsed.duration);
+              }
+            }
+          } catch (e) {}
+        }
+
         return {
           attachments: [
             {
               type: 'voice',
               url: href ?? '',
-              size: typeof c.fileSize === 'number' ? c.fileSize : undefined,
+              size,
+              meta: duration ? { duration } : undefined,
             },
           ],
         };
+      }
       case 'chat.sticker':
         return { attachments: [{ type: 'sticker', meta: c }] };
       case 'chat.link':
@@ -137,6 +223,66 @@ export class ZaloNormalizer {
             },
           ],
         };
+      case 'chat.recommended': {
+        let phone = '';
+        let qrCodeUrl = '';
+        if (typeof c.description === 'string') {
+          try {
+            const parsed = JSON.parse(c.description);
+            if (parsed && typeof parsed === 'object') {
+              phone = parsed.phone || '';
+              qrCodeUrl = parsed.qrCodeUrl || '';
+            }
+          } catch (e) {}
+        }
+
+        return {
+          attachments: [
+            {
+              type: 'link',
+              url: href ?? '',
+              meta: {
+                isCard: true,
+                title: typeof c.title === 'string' ? c.title : '',
+                thumb: typeof c.thumb === 'string' ? c.thumb : '',
+                userId: typeof c.params === 'string' ? c.params : '',
+                phone,
+                qrCodeUrl,
+              },
+            },
+          ],
+        };
+      }
+      case 'chat.location.new': {
+        let lat = '';
+        let lng = '';
+        if (typeof c.params === 'string') {
+          try {
+            const parsed = JSON.parse(c.params);
+            if (parsed && typeof parsed === 'object') {
+              lat = parsed.latitude || '';
+              lng = parsed.longitude || '';
+            }
+          } catch (e) {}
+        }
+        const mapsUrl = (lat && lng) ? `https://www.google.com/maps/search/?api=1&query=${lat},${lng}` : '';
+
+        return {
+          attachments: [
+            {
+              type: 'link',
+              url: mapsUrl,
+              meta: {
+                isLocation: true,
+                title: typeof c.title === 'string' && c.title ? c.title : 'Vị trí',
+                description: typeof c.description === 'string' ? c.description : '',
+                latitude: lat,
+                longitude: lng,
+              },
+            },
+          ],
+        };
+      }
       default:
         return { attachments: [] };
     }
