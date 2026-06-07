@@ -37,6 +37,9 @@ export const DOMAIN_EVENTS = {
 
   /** Message recalled/undone. */
   MessageRecalled: 'message.recalled',
+
+  /** Contacts/friend requests list updated. */
+  ContactsUpdated: 'contacts.updated',
 } as const;
 
 export interface MessageReceivedEvent {
@@ -85,5 +88,9 @@ export interface MessageRecalledEvent {
   customerId: number;
   conversationId: number;
   messageExternalId: string;
+}
+
+export interface ContactsUpdatedEvent {
+  customerId: number;
 }
 

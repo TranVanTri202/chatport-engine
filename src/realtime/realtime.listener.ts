@@ -9,6 +9,7 @@ import {
   MessageRecalledEvent,
   MessageReceivedEvent,
   MessageSentEvent,
+  ContactsUpdatedEvent,
 } from '@/shared/events/domain-events';
 import { RealtimeGateway } from './realtime.gateway';
 
@@ -92,6 +93,11 @@ export class RealtimeListener {
       conversationId: e.conversationId,
       messageExternalId: e.messageExternalId,
     });
+  }
+
+  @OnEvent(DOMAIN_EVENTS.ContactsUpdated)
+  onContactsUpdated(e: ContactsUpdatedEvent): void {
+    this.gateway.emitToCustomer(e.customerId, 'contacts:updated', {});
   }
 }
 

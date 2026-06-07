@@ -96,6 +96,11 @@ export class ZaloListeners {
   ): Promise<void> {
     this.logger.log(`Received Zalo friend_event: type=${event.type} for botId=${botId}`);
     try {
+      const bot = await this.prisma.bot.findUnique({
+        where: { id: botId },
+      });
+      if (!bot) return;
+
       const type = event.type;
       if (type === 0) { // ADD
         const friendUid = event.data as string;
@@ -267,7 +272,15 @@ export class ZaloListeners {
             },
           });
         }
-      } else if (type === 10 || type === 11) { // 1-to-1 chat Pin/Unpin event (10 is unpin, 11 can be pin/unpin depending on action)
+      }
+
+      if ([0, 1, 2, 3, 4, 6, 7].includes(type)) {
+        this.eventEmitter.emit(DOMAIN_EVENTS.ContactsUpdated, {
+          customerId: bot.customerId,
+        });
+      }
+
+      if (type === 10 || type === 11) { // 1-to-1 chat Pin/Unpin event (10 is unpin, 11 can be pin/unpin depending on action)
         const topic = event.data?.topic;
         const threadId = event.threadId || event.data?.conversationId;
         if (topic && threadId) {
