@@ -69,6 +69,15 @@ export class ContactsController {
     return this.contacts.sendFriendRequest(channel, externalId, body.userId, body.message ?? '');
   }
 
+  @Post('sent-requests/:userId/cancel')
+  cancelSentRequest(
+    @Param('channel') channel: ChannelType,
+    @Param('externalId') externalId: string,
+    @Param('userId') userId: string,
+  ) {
+    return this.contacts.cancelSentFriendRequest(channel, externalId, userId);
+  }
+
   @Post('chat')
   getOrCreateConversation(
     @Param('channel') channel: ChannelType,

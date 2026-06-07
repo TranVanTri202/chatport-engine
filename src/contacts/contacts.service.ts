@@ -129,6 +129,19 @@ export class ContactsService {
     return { success };
   }
 
+  async cancelSentFriendRequest(
+    channel: ChannelType,
+    externalId: string,
+    targetUserId: string,
+  ) {
+    if (channel !== ChannelType.zalo) {
+      throw new Error('Revoke friend request is only supported for Zalo');
+    }
+    const bot = await this.bots.getByExternal(channel, externalId);
+    const result = await this.zca.undoFriendRequest(bot.externalId, targetUserId);
+    return { ok: true, result };
+  }
+
   async getOrCreateConversation(
     channel: ChannelType,
     externalId: string,

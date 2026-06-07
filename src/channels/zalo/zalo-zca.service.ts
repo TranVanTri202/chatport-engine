@@ -187,6 +187,14 @@ export class ZaloZcaService {
     return api.rejectFriendRequest(friendId);
   }
 
+  async undoFriendRequest(botExternalId: string, friendId: string): Promise<any> {
+    const api = this.instances.get(botExternalId) as {
+      undoFriendRequest?: (friendId: string) => Promise<any>;
+    } | undefined;
+    if (typeof api?.undoFriendRequest !== 'function') return null;
+    return api.undoFriendRequest(friendId);
+  }
+
   async findUser(botExternalId: string, phone: string): Promise<any | null> {
     const api = this.instances.get(botExternalId) as {
       findUser?: (phone: string) => Promise<any>;
