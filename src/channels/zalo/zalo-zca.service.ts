@@ -152,6 +152,25 @@ export class ZaloZcaService {
     }
   }
 
+  async getSentFriendRequests(botExternalId: string): Promise<any[]> {
+    const api = this.instances.get(botExternalId) as {
+      getSentFriendRequest?: () => Promise<Record<string, any>>;
+    } | undefined;
+    if (typeof api?.getSentFriendRequest !== 'function') return [];
+    try {
+      const res = await api.getSentFriendRequest();
+      if (!res) return [];
+      return Object.values(res).map((info: any) => ({
+        userId: info.userId,
+        displayName: info.displayName || info.zaloName || 'Zalo User',
+        avatar: info.avatar || null,
+        message: info.fReqInfo?.message || '',
+      }));
+    } catch {
+      return [];
+    }
+  }
+
   async acceptFriendRequest(botExternalId: string, friendId: string): Promise<any> {
     const api = this.instances.get(botExternalId) as {
       acceptFriendRequest?: (friendId: string) => Promise<any>;

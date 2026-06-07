@@ -29,6 +29,14 @@ export class ContactsService {
     });
   }
 
+  async getSentFriendRequests(channel: ChannelType, externalId: string): Promise<any[]> {
+    if (channel !== ChannelType.zalo) {
+      throw new Error('Get sent friend requests is only supported for Zalo');
+    }
+    const bot = await this.bots.getByExternal(channel, externalId);
+    return this.zca.getSentFriendRequests(bot.externalId);
+  }
+
   async acceptFriendRequest(channel: ChannelType, externalId: string, requestId: number): Promise<Contact> {
     const bot = await this.bots.getByExternal(channel, externalId);
     const request = await this.prisma.friendRequest.findFirst({
