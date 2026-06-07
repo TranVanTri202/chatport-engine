@@ -15,6 +15,7 @@ import { PrismaService } from '@/shared/prisma/prisma.service';
 import { AppConfig } from '@/shared/config/app.config';
 import { REALTIME_NAMESPACE } from '@/shared/types';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { ZaloZcaService } from '@/channels/zalo/zalo-zca.service';
 
 interface SocketData {
   customerId?: number;
@@ -37,6 +38,7 @@ export class RealtimeGateway
     private readonly config: AppConfig,
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly zaloZca: ZaloZcaService,
   ) {}
 
   afterInit(): void {
@@ -100,6 +102,35 @@ export class RealtimeGateway
       threadType: payload.threadType,
       isTyping: payload.isTyping,
     });
+  }
+
+  @SubscribeMessage('user:lastOnline:request')
+  async handleLastOnlineRequest(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: { botExternalId: string; convoId?: string; uid: string },
+  ): Promise<void> {
+    const customerId = (socket.data as SocketData).customerId;
+    if (!customerId || !payload?.botExternalId || !payload?.uid) return;
+
+    try {
+      const result = await this.zaloZca.getLastOnline(payload.botExternalId, payload.uid);
+      this.server.to(`customer:${customerId}`).emit('user:lastOnline:response', {
+        convoId: payload.convoId,
+        uid: payload.uid,
+        online: result?.online ?? false,
+        lastOnline: result?.lastOnline ?? null,
+        presenceText: result?.presenceText ?? 'Ngoại tuyến',
+      });
+    } catch (err) {
+      this.logger.warn(`lastOnline request failed: ${(err as Error).message}`);
+      this.server.to(`customer:${customerId}`).emit('user:lastOnline:response', {
+        convoId: payload.convoId,
+        uid: payload.uid,
+        online: false,
+        lastOnline: null,
+        presenceText: 'Ngoại tuyến',
+      });
+    }
   }
 
   // ---- emit helpers ----

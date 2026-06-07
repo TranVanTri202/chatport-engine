@@ -418,6 +418,36 @@ export class ZaloListeners {
               },
             },
           });
+
+          // Generate system pin notification message
+          const creatorName = topic.params?.senderName || 'Thành viên';
+          const title = topic.params?.title || '';
+          const isBotCreator = String(topic.creatorId) === botExternalId;
+          const notificationText = isBotCreator
+            ? `Bạn đã ghim tin nhắn ${title}`
+            : `${creatorName} đã ghim tin nhắn ${title}`;
+
+          await this.publisher.publishInbound({
+            channel: 'zalo' as any,
+            botExternalId,
+            threadId: String(threadId),
+            threadType: 'group' as any,
+            senderExternalId: String(topic.creatorId || botExternalId),
+            senderName: creatorName,
+            messageExternalId: `pin_notif_${topic.id}_${topic.createTime || Date.now()}`,
+            timestamp: Number(topic.createTime || Date.now()),
+            type: 'unknown',
+            text: notificationText,
+            attachments: [],
+            isSelf: isBotCreator,
+            raw: {
+              isSystemPin: true,
+              topicId: topic.id,
+              title: title,
+              creatorId: topic.creatorId,
+              creatorName: creatorName,
+            },
+          });
         }
       } else if (type === 'unpin_topic') {
         const topic = event.data?.topic;
@@ -432,6 +462,35 @@ export class ZaloListeners {
                 ...metadata,
                 pinnedMessages,
               },
+            },
+          });
+
+          // Generate system unpin notification message
+          const creatorName = topic.params?.senderName || 'Thành viên';
+          const isBotCreator = String(topic.creatorId) === botExternalId;
+          const notificationText = isBotCreator
+            ? `Bạn đã bỏ ghim tin nhắn`
+            : `${creatorName} đã bỏ ghim tin nhắn`;
+
+          await this.publisher.publishInbound({
+            channel: 'zalo' as any,
+            botExternalId,
+            threadId: String(threadId),
+            threadType: 'group' as any,
+            senderExternalId: String(topic.creatorId || botExternalId),
+            senderName: creatorName,
+            messageExternalId: `unpin_notif_${topic.id}_${Date.now()}`,
+            timestamp: Date.now(),
+            type: 'unknown',
+            text: notificationText,
+            attachments: [],
+            isSelf: isBotCreator,
+            raw: {
+              isSystemPin: true,
+              isUnpin: true,
+              topicId: topic.id,
+              creatorId: topic.creatorId,
+              creatorName: creatorName,
             },
           });
         }

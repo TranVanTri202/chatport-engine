@@ -23,6 +23,32 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DOMAIN_EVENTS } from '@/shared/events/domain-events';
 
 
+export class PinMessageDto {
+  @IsString()
+  botExternalId!: string;
+
+  @IsString()
+  threadId!: string;
+
+  @IsString()
+  threadType!: string;
+
+  @IsString()
+  messageExternalId!: string;
+}
+
+export class UnpinMessageDto {
+  @IsString()
+  botExternalId!: string;
+
+  @IsString()
+  threadId!: string;
+
+  @IsString()
+  topicId!: string;
+}
+
+
 @ApiTags('messages')
 @ApiBearerAuth('jwt')
 @Controller('messages')
@@ -138,29 +164,4 @@ export class MessagesController {
     );
     return { success: true };
   }
-}
-
-export class PinMessageDto {
-  @IsString()
-  botExternalId: string;
-
-  @IsString()
-  threadId: string;
-
-  @IsString()
-  threadType: string;
-
-  @IsString()
-  messageExternalId: string;
-}
-
-export class UnpinMessageDto {
-  @IsString()
-  botExternalId: string;
-
-  @IsString()
-  threadId: string;
-
-  @IsString()
-  topicId: string;
 }

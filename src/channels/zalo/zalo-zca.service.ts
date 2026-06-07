@@ -14,13 +14,33 @@ export type ZaloUserProfile = {
  * Keep all SDK-facing helpers here so the rest of the app does not depend
  * directly on zca-js quirks or call signatures.
  */
+export type ZaloLastOnlineResponse = {
+  readonly online: boolean;
+  readonly lastOnline: number | null;
+  readonly presenceText: string;
+};
+
 @Injectable()
 export class ZaloZcaService {
+  private readonly lastOnlineInflight = new Map<string, Promise<ZaloLastOnlineResponse | null>>();
+
   constructor(
     private readonly instances: ZaloInstanceRegistry,
     private readonly redis: RedisService,
     private readonly prisma: PrismaService,
   ) {}
+
+  private formatPresenceText(lastOnline: number | null): string {
+    if (!lastOnline) return 'Ngoại tuyến';
+    const diffMs = Date.now() - lastOnline;
+    if (diffMs < 60_000) return 'Vừa xong';
+    const minutes = Math.floor(diffMs / 60_000);
+    if (minutes < 60) return `${minutes} phút trước`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours} giờ trước`;
+    const days = Math.floor(hours / 24);
+    return `${days} ngày trước`;
+  }
 
   async getUserProfile(
     botExternalId: string,
@@ -171,6 +191,53 @@ export class ZaloZcaService {
     } catch {
       return false;
     }
+  }
+
+  async getLastOnline(botExternalId: string, uid: string): Promise<ZaloLastOnlineResponse | null> {
+    const cacheKey = `zalo:last-online:${botExternalId}:${uid}`;
+    try {
+      const cached = await this.redis.cacheGet<ZaloLastOnlineResponse>(cacheKey);
+      if (cached) return cached;
+    } catch {
+      // ignore cache read failures
+    }
+
+    const inflightKey = `${botExternalId}:${uid}`;
+    const inflight = this.lastOnlineInflight.get(inflightKey);
+    if (inflight) return inflight;
+
+    const promise = (async (): Promise<ZaloLastOnlineResponse | null> => {
+      const api = this.instances.get(botExternalId) as {
+        lastOnline?: (uid: string) => Promise<{ settings?: { show_online_status?: boolean }; lastOnline?: number }>;
+      } | undefined;
+
+      if (typeof api?.lastOnline !== 'function') return null;
+
+      try {
+        const res = await api.lastOnline(uid);
+        const showOnlineSetting = Boolean(res?.settings?.show_online_status);
+        const lastOnline = typeof res?.lastOnline === 'number' ? res.lastOnline : null;
+        const online = showOnlineSetting && lastOnline ? (Date.now() - lastOnline < 180_000) : false;
+        const data: ZaloLastOnlineResponse = {
+          online,
+          lastOnline,
+          presenceText: online ? 'Đang hoạt động' : this.formatPresenceText(lastOnline),
+        };
+        try {
+          await this.redis.cacheSet(cacheKey, data, 180);
+        } catch {
+          // ignore cache set failures
+        }
+        return data;
+      } catch {
+        return null;
+      } finally {
+        this.lastOnlineInflight.delete(inflightKey);
+      }
+    })();
+
+    this.lastOnlineInflight.set(inflightKey, promise);
+    return promise;
   }
 
   getUid(api: unknown): string | null {
@@ -537,8 +604,11 @@ export class ZaloZcaService {
 
     if (typeof api.pinMessage !== 'function') {
       api.custom('pinMessage', async ({ ctx, utils, props }: any) => {
-        const serviceURL = utils.makeURL(`${api.zpwServiceMap.group_board[0]}/api/board/topic/updatev2`);
-        const params = {
+        const isPin = props.pinAct === 1 || props.pinAct === true;
+        const pinActVal = isPin ? 1 : 2;
+        const endpoint = isPin ? '/api/board/topic/createv2' : '/api/board/topic/updatev2';
+        const serviceURL = utils.makeURL(`${api.zpwServiceMap.group_board[0]}${endpoint}`);
+        const params: any = {
           grid: props.groupId,
           type: 2, // Message
           color: -16777216,
@@ -553,11 +623,17 @@ export class ZaloZcaService {
             msg_type: props.msgType || 1,
             title: props.title || "",
           }),
-          topicId: props.topicId || "",
           repeat: 0,
           imei: ctx.imei,
-          pinAct: props.pinAct ? 1 : 2,
+          pinAct: pinActVal,
         };
+
+        if (isPin) {
+          params.src = 1;
+        } else {
+          params.topicId = props.topicId || "";
+        }
+
         const encryptedParams = utils.encodeAES(JSON.stringify(params));
         if (!encryptedParams) throw new Error("Failed to encrypt params");
         const response = await utils.request(serviceURL, {
@@ -633,7 +709,7 @@ export class ZaloZcaService {
         globalMsgId: message.messageExternalId,
         msgType: msg_type,
         title,
-        pinAct,
+        pinAct: true,
       });
     } catch (err) {
       console.error('[ZaloZcaService.pinMessage] Error pinning message:', err);
@@ -652,38 +728,8 @@ export class ZaloZcaService {
     }
 
     if (typeof api.pinMessage !== 'function') {
-      api.custom('pinMessage', async ({ ctx, utils, props }: any) => {
-        const serviceURL = utils.makeURL(`${api.zpwServiceMap.group_board[0]}/api/board/topic/updatev2`);
-        const params = {
-          grid: props.groupId,
-          type: 2, // Message
-          color: -16777216,
-          emoji: "",
-          startTime: -1,
-          duration: -1,
-          params: JSON.stringify({
-            senderUid: props.senderUid || "",
-            senderName: props.senderName || "",
-            client_msg_id: props.clientMsgId || "",
-            global_msg_id: props.globalMsgId || "",
-            msg_type: props.msgType || 1,
-            title: props.title || "",
-          }),
-          topicId: props.topicId || "",
-          repeat: 0,
-          imei: ctx.imei,
-          pinAct: props.pinAct ? 1 : 2,
-        };
-        const encryptedParams = utils.encodeAES(JSON.stringify(params));
-        if (!encryptedParams) throw new Error("Failed to encrypt params");
-        const response = await utils.request(serviceURL, {
-          method: "POST",
-          body: new URLSearchParams({
-            params: encryptedParams,
-          }),
-        });
-        return utils.resolve(response, (result: any) => result.data);
-      });
+      // Re-use same registration logic to ensure consistency
+      this.pinMessage(botExternalId, threadId, '', false).catch(() => {});
     }
 
     try {

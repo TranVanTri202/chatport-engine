@@ -32,6 +32,8 @@ export class RealtimeListener {
       attachments: e.inbound.attachments,
       senderExternalId: e.inbound.senderExternalId,
       ts: e.inbound.timestamp,
+      type: e.inbound.type,
+      raw: e.inbound.raw,
     });
   }
 
