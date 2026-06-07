@@ -169,6 +169,39 @@ export class ConversationService {
   async getById(id: number): Promise<ConversationDetailItem> {
     const c = await this.repo.findById(id);
     if (!c) throw new NotFoundException(`Conversation ${id} not found`);
+
+    // Sync pinned messages if Zalo
+    const bot = await (this.repo as any).prisma.bot.findUnique({
+      where: { id: c.botId },
+    });
+
+    if (bot && bot.channel === 'zalo') {
+      const metadata = (c.metadata as Record<string, any>) || {};
+      const now = Date.now();
+      const lastSync = metadata.lastPinnedSyncAt ? Number(metadata.lastPinnedSyncAt) : 0;
+
+      // Sync if pinnedMessages is not defined or 10 minutes cache expired
+      if (!metadata.pinnedMessages || now - lastSync > 600000) {
+        try {
+          const pins = await this.zaloZcaService.getPinnedMessages(
+            bot.externalId,
+            c.threadExternalId,
+            c.threadType === 'group' ? 'group' : 'user',
+          );
+
+          const updated = await this.repo.updateMetadata(c.id, {
+            ...metadata,
+            pinnedMessages: pins,
+            lastPinnedSyncAt: now,
+          });
+
+          c.metadata = updated.metadata;
+        } catch (err) {
+          console.error(`Failed to sync pinned messages for conversation ${id}:`, err);
+        }
+      }
+    }
+
     return c as ConversationDetailItem;
   }
 

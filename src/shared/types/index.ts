@@ -12,7 +12,15 @@ export enum ThreadType {
 export enum MessageType {
   chat = 'chat',
   image = 'image',
+  video = 'video',
+  file = 'file',
+  voice = 'voice',
+  sticker = 'sticker',
+  link = 'link',
+  unknown = 'unknown',
+  pin = 'pin',
 }
+
 
 export enum MessageDirection {
   in = 'in',

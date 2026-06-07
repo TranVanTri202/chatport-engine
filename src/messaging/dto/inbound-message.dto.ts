@@ -15,7 +15,7 @@ export class InboundMessageDto {
   senderName?: string;
   messageExternalId!: string;
   timestamp!: number;
-  type!: 'chat' | 'image' | 'video' | 'file' | 'voice' | 'sticker' | 'link' | 'unknown';
+  type!: 'chat' | 'image' | 'video' | 'file' | 'voice' | 'sticker' | 'link' | 'unknown' | 'pin';
   text?: string;
   attachments!: InboundAttachment[];
   quote?: { messageExternalId: string; text?: string };

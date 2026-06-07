@@ -23,7 +23,9 @@ export type MessageType =
   | 'voice'
   | 'sticker'
   | 'link'
-  | 'unknown';
+  | 'unknown'
+  | 'pin';
+
 
 export interface InboundAttachment {
   type: AttachmentType;

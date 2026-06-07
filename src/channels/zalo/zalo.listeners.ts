@@ -60,6 +60,13 @@ export class ZaloListeners {
     botExternalId: string,
     raw: ZaloRawMessage,
   ): Promise<void> {
+    const payload = (raw.data ?? raw) as any;
+    const content = payload?.content;
+    if (content && typeof content === 'object' && content.action === 'msginfo.actionlist') {
+      this.logger.log(`Ignoring raw Zalo system action message: msgId=${payload.msgId}`);
+      return;
+    }
+
     const inbound = this.normalizer.normalizeMessage({ botExternalId, raw });
     await this.publisher.publishInbound(inbound);
   }
@@ -146,6 +153,207 @@ export class ZaloListeners {
         await this.prisma.friendRequest.deleteMany({
           where: { botId, externalId: senderUid },
         });
+      } else if (type === 10 || type === 11) { // 1-to-1 chat Pin/Unpin event (10 is unpin, 11 can be pin/unpin depending on action)
+        const topic = event.data?.topic;
+        const threadId = event.threadId || event.data?.conversationId;
+        if (topic && threadId) {
+          const bot = await this.prisma.bot.findUnique({
+            where: { id: botId },
+          });
+          if (!bot) return;
+
+          const conversation = await this.prisma.conversation.findFirst({
+            where: {
+              botId,
+              threadExternalId: String(threadId),
+            },
+          });
+          if (!conversation) return;
+
+          const metadata = (conversation.metadata as Record<string, any>) || {};
+          let pinnedMessages = metadata.pinnedMessages || [];
+
+          let params = topic.params;
+          if (typeof params === 'string') {
+            try { params = JSON.parse(params); } catch { params = {}; }
+          }
+
+          const targetId = String(topic.topicId || topic.id || '');
+          const existingPin = pinnedMessages.find((t: any) => t.id === targetId);
+          const title = existingPin?.params?.title || '';
+
+          const isUnpin = type === 10 || topic.action === 1;
+
+          if (!isUnpin) {
+            const normalizedPin = {
+              id: targetId,
+              creatorId: String(topic.creatorId || ''),
+              createTime: Number(topic.createTime || Date.now()),
+              params: {
+                title: params?.title || '',
+                senderName: params?.senderName || 'Thành viên',
+                client_msg_id: params?.client_msg_id || undefined,
+              },
+            };
+
+            pinnedMessages = pinnedMessages.filter((t: any) => t.id !== targetId);
+            pinnedMessages.push(normalizedPin);
+
+            await (this.prisma as any).conversation.update({
+              where: { id: conversation.id },
+              data: {
+                metadata: {
+                  ...metadata,
+                  pinnedMessages,
+                },
+              },
+            });
+
+            this.eventEmitter.emit(DOMAIN_EVENTS.ConversationUpdated, {
+              customerId: bot.customerId,
+              conversationId: conversation.id,
+            });
+
+            const creatorName = params?.senderName || 'Thành viên';
+            const titleStr = params?.title || '';
+            const isBotCreator = String(topic.creatorId) === botExternalId;
+            const notificationText = isBotCreator
+              ? `Bạn đã ghim tin nhắn ${titleStr}`
+              : `${creatorName} đã ghim tin nhắn ${titleStr}`;
+
+            await this.publisher.publishInbound({
+              channel: 'zalo' as any,
+              botExternalId,
+              threadId: String(threadId),
+              threadType: 'user' as any,
+              senderExternalId: String(topic.creatorId || botExternalId),
+              senderName: creatorName,
+              messageExternalId: `pin_notif_${targetId}_${topic.createTime || Date.now()}`,
+              timestamp: Number(topic.createTime || Date.now()),
+              type: 'pin',
+              text: notificationText,
+              attachments: [],
+              isSelf: isBotCreator,
+              raw: {
+                isSystemPin: true,
+                topicId: targetId,
+                title: titleStr,
+                creatorId: topic.creatorId,
+                creatorName: creatorName,
+              },
+            });
+          } else {
+            pinnedMessages = pinnedMessages.filter((t: any) => t.id !== targetId);
+            await (this.prisma as any).conversation.update({
+              where: { id: conversation.id },
+              data: {
+                metadata: {
+                  ...metadata,
+                  pinnedMessages,
+                },
+              },
+            });
+
+            this.eventEmitter.emit(DOMAIN_EVENTS.ConversationUpdated, {
+              customerId: bot.customerId,
+              conversationId: conversation.id,
+            });
+
+            const isBotActor = event.data?.actorId ? String(event.data.actorId) === botExternalId : false;
+            const actorName = isBotActor ? 'Bạn' : (params?.senderName || existingPin?.params?.senderName || 'Thành viên');
+            const notificationText = isBotActor
+              ? (title ? `Bạn đã bỏ ghim tin nhắn ${title}` : `Bạn đã bỏ ghim tin nhắn`)
+              : (title ? `${actorName} đã bỏ ghim tin nhắn ${title}` : `${actorName} đã bỏ ghim tin nhắn`);
+
+            await this.publisher.publishInbound({
+              channel: 'zalo' as any,
+              botExternalId,
+              threadId: String(threadId),
+              threadType: 'user' as any,
+              senderExternalId: String(event.data?.actorId || botExternalId),
+              senderName: actorName,
+              messageExternalId: `unpin_notif_${targetId}_${Date.now()}`,
+              timestamp: Date.now(),
+              type: 'pin',
+              text: notificationText,
+              attachments: [],
+              isSelf: isBotActor,
+              raw: {
+                isSystemPin: true,
+                isUnpin: true,
+                topicId: targetId,
+                creatorId: event.data?.actorId,
+                creatorName: actorName,
+              },
+            });
+          }
+        }
+      } else if (type === 10) { // 1-to-1 chat Unpin event
+        const topic = event.data?.topic;
+        const threadId = event.threadId || event.data?.conversationId;
+        if (topic && threadId) {
+          const bot = await this.prisma.bot.findUnique({
+            where: { id: botId },
+          });
+          if (!bot) return;
+
+          const conversation = await this.prisma.conversation.findFirst({
+            where: {
+              botId,
+              threadExternalId: String(threadId),
+            },
+          });
+          if (!conversation) return;
+
+          const metadata = (conversation.metadata as Record<string, any>) || {};
+          let pinnedMessages = metadata.pinnedMessages || [];
+
+          const targetId = String(topic.topicId || topic.id || '');
+          pinnedMessages = pinnedMessages.filter((t: any) => t.id !== targetId);
+
+          await (this.prisma as any).conversation.update({
+            where: { id: conversation.id },
+            data: {
+              metadata: {
+                ...metadata,
+                pinnedMessages,
+              },
+            },
+          });
+
+          this.eventEmitter.emit(DOMAIN_EVENTS.ConversationUpdated, {
+            customerId: bot.customerId,
+            conversationId: conversation.id,
+          });
+
+          const actorName = event.data?.actorId === botExternalId ? 'Bạn' : 'Thành viên';
+          const isBotCreator = event.data?.actorId === botExternalId;
+          const notificationText = isBotCreator
+            ? `Bạn đã bỏ ghim tin nhắn`
+            : `${actorName} đã bỏ ghim tin nhắn`;
+
+          await this.publisher.publishInbound({
+            channel: 'zalo' as any,
+            botExternalId,
+            threadId: String(threadId),
+            threadType: 'user' as any,
+            senderExternalId: String(event.data?.actorId || botExternalId),
+            senderName: actorName,
+            messageExternalId: `unpin_notif_${targetId}_${Date.now()}`,
+            timestamp: Date.now(),
+            type: 'pin',
+            text: notificationText,
+            attachments: [],
+            isSelf: isBotCreator,
+            raw: {
+              isSystemPin: true,
+              isUnpin: true,
+              topicId: targetId,
+              creatorId: event.data?.actorId,
+              creatorName: actorName,
+            },
+          });
+        }
       }
     } catch (error) {
       this.logger.error(`Error handling friend_event for botId=${botId}: ${(error as Error).message}`);
@@ -405,10 +613,27 @@ export class ZaloListeners {
       } else if (type === 'new_pin_topic' || type === 'update_pin_topic') {
         const topic = event.data?.topic;
         if (topic) {
+          let params = topic.params;
+          if (typeof params === 'string') {
+            try { params = JSON.parse(params); } catch { params = {}; }
+          }
           const metadata = (conversation.metadata as Record<string, any>) || {};
           let pinnedMessages = metadata.pinnedMessages || [];
-          pinnedMessages = pinnedMessages.filter((t: any) => t.id !== topic.id);
-          pinnedMessages.push(topic);
+
+          const normalizedPin = {
+            id: String(topic.id),
+            creatorId: String(topic.creatorId || ''),
+            createTime: Number(topic.createTime || Date.now()),
+            params: {
+              title: params?.title || '',
+              senderName: params?.senderName || 'Thành viên',
+              client_msg_id: params?.client_msg_id || undefined,
+            },
+          };
+
+          pinnedMessages = pinnedMessages.filter((t: any) => t.id !== normalizedPin.id);
+          pinnedMessages.push(normalizedPin);
+
           await (this.prisma as any).conversation.update({
             where: { id: conversation.id },
             data: {
@@ -419,9 +644,14 @@ export class ZaloListeners {
             },
           });
 
+          this.eventEmitter.emit(DOMAIN_EVENTS.ConversationUpdated, {
+            customerId: bot.customerId,
+            conversationId: conversation.id,
+          });
+
           // Generate system pin notification message
-          const creatorName = topic.params?.senderName || 'Thành viên';
-          const title = topic.params?.title || '';
+          const creatorName = params?.senderName || 'Thành viên';
+          const title = params?.title || '';
           const isBotCreator = String(topic.creatorId) === botExternalId;
           const notificationText = isBotCreator
             ? `Bạn đã ghim tin nhắn ${title}`
@@ -436,7 +666,7 @@ export class ZaloListeners {
             senderName: creatorName,
             messageExternalId: `pin_notif_${topic.id}_${topic.createTime || Date.now()}`,
             timestamp: Number(topic.createTime || Date.now()),
-            type: 'unknown',
+            type: 'pin',
             text: notificationText,
             attachments: [],
             isSelf: isBotCreator,
@@ -454,7 +684,12 @@ export class ZaloListeners {
         if (topic) {
           const metadata = (conversation.metadata as Record<string, any>) || {};
           let pinnedMessages = metadata.pinnedMessages || [];
-          pinnedMessages = pinnedMessages.filter((t: any) => t.id !== topic.id);
+
+          const targetId = String(topic.id);
+          const existingPin = pinnedMessages.find((t: any) => t.id === targetId);
+          const title = existingPin?.params?.title || '';
+
+          pinnedMessages = pinnedMessages.filter((t: any) => t.id !== targetId);
           await (this.prisma as any).conversation.update({
             where: { id: conversation.id },
             data: {
@@ -465,12 +700,21 @@ export class ZaloListeners {
             },
           });
 
+          this.eventEmitter.emit(DOMAIN_EVENTS.ConversationUpdated, {
+            customerId: bot.customerId,
+            conversationId: conversation.id,
+          });
+
           // Generate system unpin notification message
-          const creatorName = topic.params?.senderName || 'Thành viên';
+          let params = topic.params;
+          if (typeof params === 'string') {
+            try { params = JSON.parse(params); } catch { params = {}; }
+          }
+          const creatorName = params?.senderName || existingPin?.params?.senderName || 'Thành viên';
           const isBotCreator = String(topic.creatorId) === botExternalId;
           const notificationText = isBotCreator
-            ? `Bạn đã bỏ ghim tin nhắn`
-            : `${creatorName} đã bỏ ghim tin nhắn`;
+            ? (title ? `Bạn đã bỏ ghim tin nhắn ${title}` : `Bạn đã bỏ ghim tin nhắn`)
+            : (title ? `${creatorName} đã bỏ ghim tin nhắn ${title}` : `${creatorName} đã bỏ ghim tin nhắn`);
 
           await this.publisher.publishInbound({
             channel: 'zalo' as any,
@@ -481,7 +725,7 @@ export class ZaloListeners {
             senderName: creatorName,
             messageExternalId: `unpin_notif_${topic.id}_${Date.now()}`,
             timestamp: Date.now(),
-            type: 'unknown',
+            type: 'pin',
             text: notificationText,
             attachments: [],
             isSelf: isBotCreator,
@@ -500,7 +744,7 @@ export class ZaloListeners {
         const pinnedMessages = metadata.pinnedMessages || [];
         const ordered = [];
         for (const orderItem of topicsOrder) {
-          const found = pinnedMessages.find((t: any) => t.id === orderItem.topicId);
+          const found = pinnedMessages.find((t: any) => t.id === String(orderItem.topicId));
           if (found) ordered.push(found);
         }
         for (const t of pinnedMessages) {
@@ -516,6 +760,11 @@ export class ZaloListeners {
               pinnedMessages: ordered,
             },
           },
+        });
+
+        this.eventEmitter.emit(DOMAIN_EVENTS.ConversationUpdated, {
+          customerId: bot.customerId,
+          conversationId: conversation.id,
         });
       } else {
         // For other update events (title, setting, avt, etc.), sync group info

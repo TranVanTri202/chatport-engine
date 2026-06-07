@@ -36,7 +36,9 @@ enum MessageType {
   sticker
   link
   unknown
+  pin
 }
+
 
 enum BotStatus {
   active

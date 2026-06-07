@@ -760,4 +760,78 @@ export class ZaloZcaService {
       throw err;
     }
   }
+
+  async getFriendBoardList(
+    botExternalId: string,
+    threadId: string,
+  ): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api || typeof api.getFriendBoardList !== 'function') {
+      throw new Error(`getFriendBoardList not supported by bot: ${botExternalId}`);
+    }
+
+    try {
+      return await api.getFriendBoardList(threadId);
+    } catch (err) {
+      console.error('[ZaloZcaService.getFriendBoardList] Error fetching friend board list:', err);
+      throw err;
+    }
+  }
+
+  async getPinnedMessages(
+    botExternalId: string,
+    threadId: string,
+    threadType: 'user' | 'group',
+  ): Promise<any[]> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api) return [];
+    try {
+      if (threadType === 'user') {
+        if (typeof api.getFriendBoardList !== 'function') return [];
+        const res = await api.getFriendBoardList(threadId);
+        const items = res?.data || [];
+        return items.map((item: any) => {
+          let params = item.params;
+          if (typeof params === 'string') {
+            try { params = JSON.parse(params); } catch { params = {}; }
+          }
+          return {
+            id: String(item.id),
+            creatorId: String(item.creatorId || ''),
+            createTime: Number(item.createTime || Date.now()),
+            params: {
+              title: params?.title || '',
+              senderName: params?.senderName || 'Thành viên',
+              client_msg_id: params?.client_msg_id || undefined,
+            },
+          };
+        });
+      } else {
+        if (typeof api.getListBoard !== 'function') return [];
+        const res = await api.getListBoard({ page: 1, count: 20 }, threadId);
+        const boardItems = res?.items || [];
+        const pinBoard = boardItems.find((b: any) => b.boardType === 2);
+        const items = pinBoard?.data || [];
+        return items.map((item: any) => {
+          let params = item.params;
+          if (typeof params === 'string') {
+            try { params = JSON.parse(params); } catch { params = {}; }
+          }
+          return {
+            id: String(item.id),
+            creatorId: String(item.creatorId || ''),
+            createTime: Number(item.createTime || Date.now()),
+            params: {
+              title: params?.title || '',
+              senderName: params?.senderName || 'Thành viên',
+              client_msg_id: params?.client_msg_id || undefined,
+            },
+          };
+        });
+      }
+    } catch (err) {
+      console.error('[ZaloZcaService.getPinnedMessages] Error:', err);
+      return [];
+    }
+  }
 }
