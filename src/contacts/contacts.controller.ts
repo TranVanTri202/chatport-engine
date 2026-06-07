@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Post, ParseIntPipe, Body } from '@nestjs/common';
+import { Controller, Get, Param, Post, ParseIntPipe, Body, Delete } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { ContactsService } from './contacts.service';
 import { ChannelType } from '@/shared/types';
@@ -85,5 +85,14 @@ export class ContactsController {
     @Body() body: { userId: string; displayName: string; avatar?: string },
   ) {
     return this.contacts.getOrCreateConversation(channel, externalId, body.userId, body.displayName, body.avatar ?? null);
+  }
+
+  @Delete(':userId')
+  removeFriend(
+    @Param('channel') channel: ChannelType,
+    @Param('externalId') externalId: string,
+    @Param('userId') userId: string,
+  ) {
+    return this.contacts.removeFriend(channel, externalId, userId);
   }
 }

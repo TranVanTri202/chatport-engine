@@ -142,6 +142,34 @@ export class ContactsService {
     return { ok: true, result };
   }
 
+  async removeFriend(
+    channel: ChannelType,
+    externalId: string,
+    targetUserId: string,
+  ) {
+    const bot = await this.bots.getByExternal(channel, externalId);
+    const orConditions: any[] = [{ externalId: targetUserId }];
+    if (/^\d+$/.test(targetUserId)) {
+      orConditions.push({ id: parseInt(targetUserId, 10) });
+    }
+    const contact = await this.prisma.contact.findFirst({
+      where: {
+        botId: bot.id,
+        OR: orConditions,
+      },
+    });
+    if (!contact) {
+      throw new NotFoundException('Contact not found');
+    }
+    if (channel === ChannelType.zalo) {
+      await this.zca.removeFriend(bot.externalId, contact.externalId);
+    }
+    await this.prisma.contact.delete({
+      where: { id: contact.id },
+    });
+    return { ok: true };
+  }
+
   async getOrCreateConversation(
     channel: ChannelType,
     externalId: string,
