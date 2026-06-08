@@ -118,7 +118,7 @@ export class ZaloListeners {
             isFriend: true,
           },
           update: {
-            name: profile?.displayName || undefined,
+            // Không ghi đè name — biệt danh có thể đã được đặt trước
             avatar: profile?.avatar || undefined,
             isFriend: true,
           },

@@ -217,6 +217,11 @@ model Contact {
   phone       String?
   avatar      String?
   nickName    String?  // Tên gợi nhớ do admin đặt
+  zaloName    String?  // Tên zalo thật
+  cover       String?
+  gender      Int?
+  dob         String?
+  signature   String?
   isFriend    Boolean  @default(true)
   isOnline    Boolean  @default(false)
   createdAt   DateTime @default(now())

@@ -40,6 +40,9 @@ export const DOMAIN_EVENTS = {
 
   /** Contacts/friend requests list updated. */
   ContactsUpdated: 'contacts.updated',
+
+  /** Conversation display name renamed (alias set or removed). */
+  ConversationRenamed: 'conversation.renamed',
 } as const;
 
 export interface MessageReceivedEvent {
@@ -94,3 +97,12 @@ export interface ContactsUpdatedEvent {
   customerId: number;
 }
 
+export interface ConversationRenamedEvent {
+  customerId: number;
+  /** DB id của conversation */
+  conversationId: number;
+  /** Zalo UID của người dùng (= threadExternalId của conversation) */
+  threadExternalId: string;
+  /** Tên mới (biệt danh hoặc zaloName khi xóa biệt danh) */
+  title: string;
+}

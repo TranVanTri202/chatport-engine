@@ -46,13 +46,19 @@ export class ConversationService {
   ) {
     if (channel !== 'zalo') return null;
 
-    const existingParticipant = await this.repo.findParticipantProfile(channel, botExternalId, userId);
+    // Ưu tiên #1: Contact.name (biệt danh người dùng đặt)
+    const contactProfile = await this.repo.findContactDisplayName(channel, botExternalId, userId);
+    if (contactProfile?.displayName) {
+      return contactProfile;
+    }
 
-    const hasProfile = Boolean(existingParticipant?.displayName || existingParticipant?.avatar);
-    if (hasProfile) {
+    // Ưu tiên #2: Participant.displayName đã lưu
+    const existingParticipant = await this.repo.findParticipantProfile(channel, botExternalId, userId);
+    if (existingParticipant?.displayName) {
       return existingParticipant;
     }
 
+    // Ưu tiên #3: ZCA API (lần đầu gặp)
     const profile = await this.zaloZcaService.getUserProfile(botExternalId, userId);
     if (profile) {
       return profile;

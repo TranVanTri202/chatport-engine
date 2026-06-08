@@ -35,6 +35,27 @@ export class ConversationRepository {
     });
   }
 
+  /** Lấy displayName ưu tiên từ Contact (biệt danh > zaloName) */
+  async findContactDisplayName(
+    channel: ChannelType,
+    botExternalId: string,
+    userId: string,
+  ): Promise<{ displayName: string | null; avatar: string | null } | null> {
+    const bot = await this.prisma.bot.findUnique({
+      where: { channel_externalId: { channel, externalId: botExternalId } },
+      select: { id: true },
+    });
+    if (!bot) return null;
+
+    const contact = await this.prisma.contact.findFirst({
+      where: { botId: bot.id, externalId: userId },
+      select: { name: true, avatar: true },
+    });
+
+    if (!contact) return null;
+    return { displayName: contact.name, avatar: contact.avatar };
+  }
+
   async upsertConversationFromInbound(input: {
     botId: number;
     threadExternalId: string;

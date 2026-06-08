@@ -173,6 +173,20 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
       const friends = await this.zca.getAllFriends(botExternalId);
       this.logger.log(`Found ${friends.length} friends for botId=${botId}`);
       for (const friend of friends) {
+        const newZaloName = friend.zaloName || null;
+        const defaultName = friend.displayName || friend.zaloName || friend.username || 'Zalo Friend';
+
+        // Lấy contact hiện tại để kiểm tra biệt danh
+        const existing = await this.prisma.contact.findUnique({
+          where: { botId_externalId: { botId, externalId: friend.userId } },
+          select: { name: true, zaloName: true },
+        });
+
+        // Chỉ cập nhật name nếu chưa có biệt danh
+        // (biệt danh = name khác với zaloName cũ)
+        const hasCustomAlias = existing && existing.zaloName && existing.name !== existing.zaloName;
+        const nameToSet = hasCustomAlias ? existing!.name : defaultName;
+
         await this.prisma.contact.upsert({
           where: {
             botId_externalId: {
@@ -183,13 +197,25 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
           create: {
             botId,
             externalId: friend.userId,
-            name: friend.displayName || friend.zaloName || friend.username || 'Zalo Friend',
+            name: defaultName,
             avatar: friend.avatar || null,
+            phone: friend.phoneNumber || null,
+            cover: friend.cover || null,
+            gender: friend.gender !== undefined ? friend.gender : null,
+            dob: friend.sdob || (friend.dob ? String(friend.dob) : null),
+            signature: friend.status || null,
+            zaloName: newZaloName,
             isFriend: true,
           },
           update: {
-            name: friend.displayName || friend.zaloName || friend.username || 'Zalo Friend',
+            name: nameToSet,
             avatar: friend.avatar || null,
+            phone: friend.phoneNumber || null,
+            cover: friend.cover || null,
+            gender: friend.gender !== undefined ? friend.gender : null,
+            dob: friend.sdob || (friend.dob ? String(friend.dob) : null),
+            signature: friend.status || null,
+            zaloName: newZaloName,
             isFriend: true,
           },
         });

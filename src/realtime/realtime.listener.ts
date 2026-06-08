@@ -3,6 +3,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import {
   BotStatusChangedEvent,
   ConversationUpdatedEvent,
+  ConversationRenamedEvent,
   DOMAIN_EVENTS,
   DocumentStatusChangedEvent,
   MessageReactedEvent,
@@ -98,6 +99,14 @@ export class RealtimeListener {
   @OnEvent(DOMAIN_EVENTS.ContactsUpdated)
   onContactsUpdated(e: ContactsUpdatedEvent): void {
     this.gateway.emitToCustomer(e.customerId, 'contacts:updated', {});
+  }
+
+  @OnEvent(DOMAIN_EVENTS.ConversationRenamed)
+  onConversationRenamed(e: ConversationRenamedEvent): void {
+    this.gateway.emitToCustomer(e.customerId, 'conversation:renamed', {
+      conversationId: e.conversationId,
+      title: e.title,
+    });
   }
 }
 

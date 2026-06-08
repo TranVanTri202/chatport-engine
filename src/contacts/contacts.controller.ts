@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Post, ParseIntPipe, Body, Delete } from '@nestjs/common';
+import { Controller, Get, Param, Post, ParseIntPipe, Body, Delete, Patch } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { ContactsService } from './contacts.service';
 import { ChannelType } from '@/shared/types';
@@ -94,5 +94,24 @@ export class ContactsController {
     @Param('userId') userId: string,
   ) {
     return this.contacts.removeFriend(channel, externalId, userId);
+  }
+
+  @Patch(':userId/alias')
+  changeFriendAlias(
+    @Param('channel') channel: ChannelType,
+    @Param('externalId') externalId: string,
+    @Param('userId') userId: string,
+    @Body() body: { alias: string },
+  ) {
+    return this.contacts.changeFriendAlias(channel, externalId, userId, body.alias);
+  }
+
+  @Delete(':userId/alias')
+  removeFriendAlias(
+    @Param('channel') channel: ChannelType,
+    @Param('externalId') externalId: string,
+    @Param('userId') userId: string,
+  ) {
+    return this.contacts.removeFriendAlias(channel, externalId, userId);
   }
 }

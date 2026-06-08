@@ -42,6 +42,30 @@ export class ZaloZcaService {
     return `${days} ngày trước`;
   }
 
+  private async resolveThreadId(botExternalId: string, threadId: string): Promise<string> {
+    if (/^\d+$/.test(threadId) && threadId.length < 10) {
+      const contactId = parseInt(threadId, 10);
+      try {
+        const bot = await this.prisma.bot.findUnique({
+          where: { channel_externalId: { channel: 'zalo', externalId: botExternalId } },
+          select: { id: true },
+        });
+        if (bot) {
+          const contact = await this.prisma.contact.findFirst({
+            where: { botId: bot.id, id: contactId },
+            select: { externalId: true },
+          });
+          if (contact) {
+            return contact.externalId;
+          }
+        }
+      } catch (err) {
+        console.warn(`[resolveThreadId] Error:`, err);
+      }
+    }
+    return threadId;
+  }
+
   async getUserProfile(
     botExternalId: string,
     userId: string,
@@ -203,6 +227,22 @@ export class ZaloZcaService {
     return api.removeFriend(friendId);
   }
 
+  async changeFriendAlias(botExternalId: string, alias: string, friendId: string): Promise<any> {
+    const api = this.instances.get(botExternalId) as {
+      changeFriendAlias?: (alias: string, friendId: string) => Promise<any>;
+    } | undefined;
+    if (typeof api?.changeFriendAlias !== 'function') return null;
+    return api.changeFriendAlias(alias, friendId);
+  }
+
+  async removeFriendAlias(botExternalId: string, friendId: string): Promise<any> {
+    const api = this.instances.get(botExternalId) as {
+      removeFriendAlias?: (friendId: string) => Promise<any>;
+    } | undefined;
+    if (typeof api?.removeFriendAlias !== 'function') return null;
+    return api.removeFriendAlias(friendId);
+  }
+
   async findUser(botExternalId: string, phone: string): Promise<any | null> {
     const api = this.instances.get(botExternalId) as {
       findUser?: (phone: string) => Promise<any>;
@@ -314,6 +354,8 @@ export class ZaloZcaService {
       throw new Error(`Zalo API instance not found for bot: ${botExternalId}`);
     }
 
+    const resolvedThreadId = threadType === 0 ? await this.resolveThreadId(botExternalId, threadId) : threadId;
+
     const parseAttachment = (url: string) => {
       if (url.startsWith('data:')) {
         const match = url.match(/^data:([^;]+);name=([^;]+);base64,(.+)$/);
@@ -337,7 +379,7 @@ export class ZaloZcaService {
       if (!msg.text?.trim()) {
         throw new Error('Text is required for chat messages');
       }
-      return api.sendMessage?.({ msg: msg.text }, threadId, threadType);
+      return api.sendMessage?.({ msg: msg.text }, resolvedThreadId, threadType);
     } else if (msg.type === 'image') {
       if (!msg.attachments?.length) {
         throw new Error('Image attachment is required for image messages');
@@ -350,7 +392,7 @@ export class ZaloZcaService {
           msg: first.caption ?? msg.text ?? '',
           attachments: attachmentSource,
         },
-        threadId,
+        resolvedThreadId,
         threadType,
       );
     } else if (msg.type === 'voice') {
@@ -364,13 +406,13 @@ export class ZaloZcaService {
         throw new Error('zca-js sendVoice or uploadAttachment API is not available');
       }
 
-      const uploadResults = await api.uploadAttachment(parsed, threadId, threadType);
+      const uploadResults = await api.uploadAttachment(parsed, resolvedThreadId, threadType);
       if (!uploadResults || uploadResults.length === 0) {
         throw new Error('Failed to upload voice attachment to Zalo');
       }
       const fileUrl = (uploadResults[0] as any).fileUrl;
 
-      return api.sendVoice({ voiceUrl: fileUrl, ttl: 0 }, threadId, threadType);
+      return api.sendVoice({ voiceUrl: fileUrl, ttl: 0 }, resolvedThreadId, threadType);
     } else if (msg.type === 'video') {
       if (!msg.attachments?.length) {
         throw new Error('Video attachment is required');
@@ -382,13 +424,13 @@ export class ZaloZcaService {
         throw new Error('zca-js sendVideo or uploadAttachment API is not available');
       }
 
-      const uploadResults = await api.uploadAttachment(parsed, threadId, threadType);
+      const uploadResults = await api.uploadAttachment(parsed, resolvedThreadId, threadType);
       if (!uploadResults || uploadResults.length === 0) {
         throw new Error('Failed to upload video attachment to Zalo');
       }
       const fileUrl = (uploadResults[0] as any).fileUrl;
 
-      return api.sendVideo({ videoUrl: fileUrl, msg: msg.text || '' }, threadId, threadType);
+      return api.sendVideo({ videoUrl: fileUrl, msg: msg.text || '' }, resolvedThreadId, threadType);
     } else if (msg.type === 'file') {
       if (!msg.attachments?.length) {
         throw new Error('File attachment is required');
@@ -401,7 +443,7 @@ export class ZaloZcaService {
           msg: msg.text ?? '',
           attachments: parsed,
         },
-        threadId,
+        resolvedThreadId,
         threadType,
       );
     } else {
@@ -671,8 +713,14 @@ export class ZaloZcaService {
       return null;
     }
 
+    if (!isTyping) {
+      return null;
+    }
+
+    const resolvedThreadId = threadType === 0 ? await this.resolveThreadId(botExternalId, threadId) : threadId;
+
     try {
-      return await api.sendTypingEvent(threadId, threadType, isTyping);
+      return await api.sendTypingEvent(resolvedThreadId, threadType);
     } catch (err) {
       console.error(`[ZaloZcaService.sendTypingEvent] ZCA error:`, err);
       return null;
@@ -873,10 +921,11 @@ export class ZaloZcaService {
   ): Promise<any[]> {
     const api = this.instances.get(botExternalId) as any;
     if (!api) return [];
+    const resolvedThreadId = threadType === 'user' ? await this.resolveThreadId(botExternalId, threadId) : threadId;
     try {
       if (threadType === 'user') {
         if (typeof api.getFriendBoardList !== 'function') return [];
-        const res = await api.getFriendBoardList(threadId);
+        const res = await api.getFriendBoardList(resolvedThreadId);
         const items = res?.data || [];
         return items.map((item: any) => {
           let params = item.params;
@@ -896,7 +945,7 @@ export class ZaloZcaService {
         });
       } else {
         if (typeof api.getListBoard !== 'function') return [];
-        const res = await api.getListBoard({ page: 1, count: 20 }, threadId);
+        const res = await api.getListBoard({ page: 1, count: 20 }, resolvedThreadId);
         const boardItems = res?.items || [];
         const pinBoard = boardItems.find((b: any) => b.boardType === 2);
         const items = pinBoard?.data || [];
@@ -918,7 +967,11 @@ export class ZaloZcaService {
         });
       }
     } catch (err) {
-      console.error('[ZaloZcaService.getPinnedMessages] Error:', err);
+      if ((err as any)?.code === 114) {
+        console.warn(`[ZaloZcaService.getPinnedMessages] Zalo returned invalid parameters for thread: ${resolvedThreadId} (likely not friends or not group)`);
+      } else {
+        console.error('[ZaloZcaService.getPinnedMessages] Error:', err);
+      }
       return [];
     }
   }
