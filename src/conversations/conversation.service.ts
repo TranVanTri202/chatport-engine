@@ -703,4 +703,39 @@ export class ConversationService {
       console.warn('Failed to fetch updated avatar immediately:', err);
     }
   }
+
+  async updateMute(id: number, isMuted: boolean): Promise<void> {
+    const convo = await this.prisma.conversation.findUnique({
+      where: { id },
+      include: { bot: true },
+    });
+    if (!convo) {
+      throw new NotFoundException(`Conversation ${id} not found`);
+    }
+
+    if (convo.bot.channel === 'zalo') {
+      try {
+        const threadTypeNum = convo.threadType === 'group' ? 1 : 0;
+        await this.zaloZcaService.setMute(
+          convo.bot.externalId,
+          convo.threadExternalId,
+          threadTypeNum,
+          isMuted,
+        );
+      } catch (err) {
+        console.warn(`Failed to set mute status on Zalo: ${(err as Error).message}`);
+      }
+    }
+
+    const metadata = (convo.metadata as Record<string, any>) || {};
+    await this.prisma.conversation.update({
+      where: { id },
+      data: {
+        metadata: {
+          ...metadata,
+          isMuted,
+        },
+      },
+    });
+  }
 }

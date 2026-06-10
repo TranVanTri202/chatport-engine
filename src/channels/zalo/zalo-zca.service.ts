@@ -1282,5 +1282,26 @@ export class ZaloZcaService {
     const parsed = parseAttachment(avatarUrl);
     return api.changeGroupAvatar(parsed, groupId);
   }
+
+  async setMute(
+    botExternalId: string,
+    threadId: string,
+    threadType: number,
+    isMuted: boolean,
+  ): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api || typeof api.setMute !== 'function') {
+      console.warn(`setMute not supported by bot: ${botExternalId}`);
+      return null;
+    }
+    const resolvedThreadId = threadType === 0 ? await this.resolveThreadId(botExternalId, threadId) : threadId;
+    try {
+      const action = isMuted ? 1 : 3; // 1 = Mute, 3 = Unmute
+      return await api.setMute({ action, duration: -1 }, resolvedThreadId, threadType);
+    } catch (err) {
+      console.error(`[ZaloZcaService.setMute] ZCA error:`, err);
+      throw err;
+    }
+  }
 }
 

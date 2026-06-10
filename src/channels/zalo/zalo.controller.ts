@@ -1,9 +1,24 @@
-import { Controller, Get, NotFoundException, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, NotFoundException, Param, Patch, Post } from '@nestjs/common';
 import { promises as fs } from 'node:fs';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { IsOptional, IsString } from 'class-validator';
 import { CurrentCustomer } from '@/shared/decorators/current-customer.decorator';
 import { ZaloQrStorageService } from './zalo-qr-storage.service';
 import { ZaloAdapter } from './zalo.adapter';
+
+export class UpdateZaloProfileDto {
+  @IsString()
+  @IsOptional()
+  name?: string;
+
+  @IsString()
+  @IsOptional()
+  bio?: string;
+
+  @IsString()
+  @IsOptional()
+  avatar?: string;
+}
 
 /**
  * Convenience wrapper for /channels/zalo/login (also reachable through the
@@ -57,5 +72,23 @@ export class ZaloController {
   async logout(@Param('botId') botId: string) {
     await this.adapter.logout(Number(botId));
     return { ok: true };
+  }
+
+  @Get('profile/:botId')
+  async getProfile(@Param('botId') botId: string) {
+    return this.adapter.getProfile(Number(botId));
+  }
+
+  @Patch('profile/:botId')
+  async updateProfile(
+    @Param('botId') botId: string,
+    @Body() body: UpdateZaloProfileDto,
+  ) {
+    return this.adapter.updateProfile(
+      Number(botId),
+      body.name,
+      body.bio,
+      body.avatar,
+    );
   }
 }

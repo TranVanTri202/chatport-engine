@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, NotFoundException } from '@nestjs/common';
 import { ChannelType, ThreadType } from '@/shared/types';
 import { ZaloQrStorageService } from './zalo-qr-storage.service';
 import {
@@ -388,5 +388,153 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
 
   async status(botExternalId: string): Promise<ChannelStatus> {
     return this.instances.has(botExternalId) ? 'online' : 'offline';
+  }
+
+  async getProfile(botId: number): Promise<any> {
+    const bot = await this.prisma.bot.findUnique({ where: { id: botId } });
+    if (!bot) throw new NotFoundException(`Bot ${botId} not found`);
+    const botExternalId = bot.externalId;
+
+    const api = this.instances.get(botExternalId) as any;
+    if (!api) {
+      return {
+        name: bot.name || 'Zalo Bot',
+        avatar: bot.avatar,
+        bio: '',
+        status: 'offline',
+      };
+    }
+
+    try {
+      const info = await api.fetchAccountInfo();
+      return {
+        name: info?.profile?.displayName || info?.profile?.zaloName || bot.name || 'Zalo Bot',
+        avatar: info?.profile?.avatar || bot.avatar,
+        bio: info?.profile?.status || '',
+        status: 'online',
+      };
+    } catch (err) {
+      this.logger.warn(`Failed to fetch profile info: ${(err as Error).message}`);
+      return {
+        name: bot.name || 'Zalo Bot',
+        avatar: bot.avatar,
+        bio: '',
+        status: 'online',
+      };
+    }
+  }
+
+  async updateProfile(botId: number, name?: string, bio?: string, avatarBase64?: string): Promise<any> {
+    const bot = await this.prisma.bot.findUnique({ where: { id: botId } });
+    if (!bot) throw new NotFoundException(`Bot ${botId} not found`);
+    const botExternalId = bot.externalId;
+
+    const api = this.instances.get(botExternalId) as any;
+    if (!api) {
+      throw new ChannelOfflineError(`Bot session is offline or not loaded`);
+    }
+
+    if (bio !== undefined) {
+      if (typeof api.updateProfileBio !== 'function') {
+        throw new Error('updateProfileBio is not supported by Zalo SDK');
+      }
+      await api.updateProfileBio(bio);
+    }
+
+    if (name !== undefined) {
+      if (typeof api.updateProfile !== 'function') {
+        throw new Error('updateProfile is not supported by Zalo SDK');
+      }
+
+      let dobStr: `${string}-${string}-${string}` = '2000-01-01';
+      let gender = 0;
+      try {
+        const info = await api.fetchAccountInfo();
+        if (info?.profile) {
+          gender = info.profile.gender ?? 0;
+          if (info.profile.sdob && info.profile.sdob.includes('/')) {
+            const parts = info.profile.sdob.split('/');
+            if (parts.length === 3) {
+              dobStr = `${parts[2]}-${parts[1]}-${parts[0]}`;
+            }
+          } else if (info.profile.sdob && info.profile.sdob.includes('-')) {
+            dobStr = info.profile.sdob;
+          }
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to fetch current account info for profile update: ${(err as Error).message}`);
+      }
+
+      await api.updateProfile({
+        profile: {
+          name,
+          dob: dobStr,
+          gender,
+        },
+      });
+
+      await this.prisma.bot.update({
+        where: { id: botId },
+        data: { name },
+      });
+    }
+
+    if (avatarBase64 !== undefined && avatarBase64) {
+      if (typeof api.changeAccountAvatar !== 'function') {
+        throw new Error('changeAccountAvatar is not supported by Zalo SDK');
+      }
+
+      const parsedAttachment = this.parseAvatarAttachment(avatarBase64);
+      await api.changeAccountAvatar(parsedAttachment);
+
+      let newAvatarUrl: string | null = null;
+      try {
+        const info = await api.fetchAccountInfo();
+        if (info?.profile?.avatar) {
+          newAvatarUrl = info.profile.avatar;
+          await this.prisma.bot.update({
+            where: { id: botId },
+            data: { avatar: newAvatarUrl },
+          });
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to fetch updated avatar URL from Zalo: ${(err as Error).message}`);
+      }
+    }
+
+    return this.prisma.bot.findUnique({ where: { id: botId } });
+  }
+
+  private parseAvatarAttachment(url: string) {
+    if (url.startsWith('data:')) {
+      const match = url.match(/^data:([^;]+);name=([^;]+);base64,(.+)$/);
+      if (match) {
+        const [, mimeType, encodedName, base64Data] = match;
+        const fileName = decodeURIComponent(encodedName);
+        const buffer = Buffer.from(base64Data, 'base64');
+        return {
+          data: buffer,
+          filename: fileName as `${string}.${string}`,
+          metadata: {
+            totalSize: buffer.length,
+          },
+        };
+      } else {
+        const base64Match = url.match(/^data:([^;]+);base64,(.+)$/);
+        if (base64Match) {
+          const [, mimeType, base64Data] = base64Match;
+          const ext = mimeType.split('/')[1] || 'png';
+          const buffer = Buffer.from(base64Data, 'base64');
+          return {
+            data: buffer,
+            filename: `avatar.${ext}` as `${string}.${string}`,
+            metadata: {
+              totalSize: buffer.length,
+            },
+          };
+        }
+      }
+    }
+    return url;
   }
 }

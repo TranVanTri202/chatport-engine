@@ -16,8 +16,8 @@ import { ChannelType } from '@/shared/types';
 export class BotRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  findManyByCustomer(customerId: number) {
-    return this.prisma.bot.findMany({
+  async findManyByCustomer(customerId: number) {
+    const bots = await this.prisma.bot.findMany({
       where: { customerId },
       include: {
         _count: {
@@ -26,8 +26,27 @@ export class BotRepository {
             contacts: { where: { isFriend: true } },
           },
         },
+        conversations: {
+          select: {
+            unread: true,
+            metadata: true,
+          },
+        },
       },
       orderBy: { id: 'desc' },
+    });
+
+    return bots.map((bot) => {
+      const { conversations, ...rest } = bot;
+      const unread = conversations.reduce((sum, c) => {
+        const metadata = (c.metadata as Record<string, any>) || {};
+        if (metadata.isMuted) return sum;
+        return sum + c.unread;
+      }, 0);
+      return {
+        ...rest,
+        unread,
+      };
     });
   }
 

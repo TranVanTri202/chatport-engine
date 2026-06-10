@@ -89,6 +89,15 @@ export class ConversationsController {
     return { ok: true };
   }
 
+  @Patch(':id/mute')
+  async toggleMute(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { isMuted: boolean },
+  ) {
+    await this.conversations.updateMute(id, body.isMuted);
+    return { ok: true };
+  }
+
   @Post('groups')
   async createGroup(
     @Param('channel') channel: string,
