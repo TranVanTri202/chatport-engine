@@ -112,8 +112,33 @@ export class ZaloNormalizer {
         return { attachments: [this.extractFile(c, href)] };
       case 'chat.voice':
         return { attachments: [this.extractVoice(c, href)] };
-      case 'chat.sticker':
-        return { attachments: [{ type: 'sticker', meta: c }] };
+      case 'chat.sticker': {
+        const stickerId = c.id ?? c.stickerId ?? null;
+        const ZALO_STICKER_BASE_URL = 'https://zalo-api.zadn.vn';
+        const stickerUrl = (typeof c.stickerUrl === 'string' ? c.stickerUrl : undefined)
+          ?? (typeof c.href === 'string' ? c.href : undefined)
+          ?? (typeof c.thumb === 'string' ? c.thumb : undefined)
+          ?? (stickerId ? `${ZALO_STICKER_BASE_URL}/api/emoticon/sticker/webpc?eid=${stickerId}&size=130` : '');
+        const spriteUrl = (typeof c.stickerSpriteUrl === 'string' ? c.stickerSpriteUrl : undefined)
+          ?? (stickerId ? `${ZALO_STICKER_BASE_URL}/api/emoticon/sprite?eid=${stickerId}&size=130` : '');
+
+        return {
+          attachments: [
+            {
+              type: 'sticker',
+              url: stickerUrl,
+              meta: {
+                sticker_id: stickerId ? Number(stickerId) : undefined,
+                cat_id: c.catId ?? c.cateId ?? c.cate_id,
+                sticker_type: c.type ?? c.stickerType,
+                url: stickerUrl,
+                sprite_url: spriteUrl,
+                frames: c.totalFrames ?? null,
+              },
+            },
+          ],
+        };
+      }
       case 'chat.link':
         return {
           attachments: [{

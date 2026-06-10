@@ -58,6 +58,7 @@ export interface InboundMessage {
 export interface OutboundAttachment {
   url: string;
   caption?: string;
+  meta?: Record<string, unknown>;
 }
 
 export interface OutboundMessage {

@@ -9,8 +9,18 @@ export class SendMessageValidationService {
       input.type === MessageType.webchat ||
       input.type === MessageType.chat;
 
-    if (!isTextType && input.type !== MessageType.image) {
-      throw new BadRequestException('Currently only webchat (text) and image messages are supported');
+    const supportedTypes = [
+      MessageType.webchat,
+      MessageType.chat,
+      MessageType.image,
+      MessageType.voice,
+      MessageType.video,
+      MessageType.file,
+      MessageType.sticker,
+    ];
+
+    if (!supportedTypes.includes(input.type)) {
+      throw new BadRequestException(`Unsupported message type: ${input.type}`);
     }
 
     if (isTextType) {
@@ -20,6 +30,18 @@ export class SendMessageValidationService {
 
     if (input.type === MessageType.image) {
       this.validateImage(input.attachments?.length ?? 0);
+      return;
+    }
+
+    if (
+      input.type === MessageType.voice ||
+      input.type === MessageType.video ||
+      input.type === MessageType.file ||
+      input.type === MessageType.sticker
+    ) {
+      if (!input.attachments?.length) {
+        throw new BadRequestException(`At least one attachment is required for ${input.type} messages`);
+      }
     }
   }
 

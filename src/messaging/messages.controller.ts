@@ -2,7 +2,8 @@ import { BadRequestException, Body, Controller, Post, UploadedFile, UseIntercept
 import { CommandBus } from '@nestjs/cqrs';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsNumber, IsObject, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 import { SendMessageCommand } from './commands/send-message.command';
 import { SendTextMessageDto } from './dto/send-text-message.dto';
 import { SendImageFileDto } from './dto/send-image-file.dto';
@@ -63,6 +64,36 @@ export class UnpinMessageDto {
   topicId!: string;
 }
 
+class StickerDataDto {
+  @IsNumber()
+  sticker_id!: number;
+
+  @IsNumber()
+  cat_id!: number;
+
+  @IsNumber()
+  sticker_type!: number;
+
+  @IsString()
+  url!: string;
+}
+
+export class SendStickerMessageDto {
+  @IsString()
+  botExternalId!: string;
+
+  @IsString()
+  threadId!: string;
+
+  @IsEnum(ThreadType)
+  threadType!: ThreadType;
+
+  @IsObject()
+  @ValidateNested()
+  @Type(() => StickerDataDto)
+  sticker!: StickerDataDto;
+}
+
 
 @ApiTags('messages')
 @ApiBearerAuth('jwt')
@@ -92,6 +123,29 @@ export class MessagesController {
         type: MessageType.webchat,
         text: body.text,
         quote: body.quoteMessageExternalId ? { messageExternalId: body.quoteMessageExternalId } : undefined,
+      }),
+    );
+  }
+
+  @Post('send/sticker')
+  sendSticker(@Body() body: SendStickerMessageDto) {
+    return this.commands.execute(
+      new SendMessageCommand({
+        botExternalId: body.botExternalId,
+        threadId: body.threadId,
+        threadType: body.threadType,
+        type: MessageType.sticker,
+        attachments: [
+          {
+            url: body.sticker.url,
+            meta: {
+              sticker_id: body.sticker.sticker_id,
+              cat_id: body.sticker.cat_id,
+              sticker_type: body.sticker.sticker_type,
+              url: body.sticker.url,
+            },
+          },
+        ],
       }),
     );
   }

@@ -1,10 +1,12 @@
-import { Body, Controller, Get, NotFoundException, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, NotFoundException, Param, Patch, Post, Query } from '@nestjs/common';
 import { promises as fs } from 'node:fs';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { IsOptional, IsString } from 'class-validator';
 import { CurrentCustomer } from '@/shared/decorators/current-customer.decorator';
 import { ZaloQrStorageService } from './zalo-qr-storage.service';
 import { ZaloAdapter } from './zalo.adapter';
+import { ZaloZcaService } from './zalo-zca.service';
+import { PrismaService } from '@/shared/prisma/prisma.service';
 
 export class UpdateZaloProfileDto {
   @IsString()
@@ -31,6 +33,8 @@ export class ZaloController {
   constructor(
     private readonly adapter: ZaloAdapter,
     private readonly qrStorage: ZaloQrStorageService,
+    private readonly zca: ZaloZcaService,
+    private readonly prisma: PrismaService,
   ) {}
 
   @Post('login')
@@ -90,5 +94,16 @@ export class ZaloController {
       body.bio,
       body.avatar,
     );
+  }
+
+  @Get('stickers/:botId')
+  async getStickers(
+    @Param('botId') botId: string,
+    @Query('keyword') keyword?: string,
+  ) {
+    const bot = await this.prisma.bot.findUnique({ where: { id: Number(botId) } });
+    if (!bot) throw new NotFoundException(`Bot ${botId} not found`);
+    const data = await this.zca.getStickers(bot.externalId, keyword);
+    return { data };
   }
 }

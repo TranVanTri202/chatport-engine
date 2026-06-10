@@ -472,6 +472,7 @@ export class ZaloZcaService {
       sendVoice?: (options: { voiceUrl: string; ttl?: number }, threadId: string, type?: number) => Promise<any>;
       sendVideo?: (options: { videoUrl: string; msg?: string; ttl?: number }, threadId: string, type?: number) => Promise<any>;
       uploadAttachment?: (sources: any | any[], threadId: string, type?: number) => Promise<any[]>;
+      sendSticker?: (sticker: { id: number; cateId: number; type: number }, threadId: string, type?: number) => Promise<{ msgId: number }>;
     } | undefined;
 
     if (!api) {
@@ -566,6 +567,33 @@ export class ZaloZcaService {
         {
           msg: msg.text ?? '',
           attachments: parsed,
+        },
+        resolvedThreadId,
+        threadType,
+      );
+    } else if (msg.type === 'sticker') {
+      if (!msg.attachments?.length) {
+        throw new Error('Sticker attachment is required');
+      }
+      const [first] = msg.attachments;
+      const meta = (first as any).meta ?? {};
+      const stickerId = meta.sticker_id ?? meta.id;
+      const cateId = meta.cat_id ?? meta.cateId;
+      const stickerType = meta.sticker_type ?? meta.type;
+
+      if (!stickerId || !cateId || !stickerType) {
+        throw new Error('Sticker id, cat_id, and type are required');
+      }
+
+      if (typeof api.sendSticker !== 'function') {
+        throw new Error('zca-js sendSticker API is not available');
+      }
+
+      return api.sendSticker(
+        {
+          id: Number(stickerId),
+          cateId: Number(cateId),
+          type: Number(stickerType),
         },
         resolvedThreadId,
         threadType,
@@ -1302,6 +1330,42 @@ export class ZaloZcaService {
       console.error(`[ZaloZcaService.setMute] ZCA error:`, err);
       throw err;
     }
+  }
+
+  async getStickers(botExternalId: string, keyword?: string): Promise<any[]> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api) return [];
+
+    let ids: number[] = [];
+    try {
+      if (keyword?.trim()) {
+        if (typeof api.searchSticker === 'function') {
+          const basics = await api.searchSticker(keyword.trim());
+          ids = (basics || []).map((s: any) => Number(s.sticker_id ?? s.stickerId ?? 0)).filter(Boolean);
+        }
+      } else {
+        if (typeof api.getStickers === 'function') {
+          ids = await api.getStickers('vui'); // default category is 'vui'
+        }
+      }
+
+      if (!ids || ids.length === 0) return [];
+
+      if (typeof api.getStickersDetail === 'function') {
+        const details = await api.getStickersDetail(ids);
+        return (details || []).map((d: any) => ({
+          sticker_id: d.id,
+          cat_id: d.cateId,
+          sticker_type: d.type,
+          url: d.stickerUrl || d.stickerWebpUrl,
+          sprite_url: d.stickerSpriteUrl,
+          frames: d.totalFrames,
+        }));
+      }
+    } catch (err) {
+      console.error(`[ZaloZcaService.getStickers] ZCA error:`, err);
+    }
+    return [];
   }
 }
 
