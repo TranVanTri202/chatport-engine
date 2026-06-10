@@ -176,6 +176,30 @@ export class ZaloZcaService {
     }
   }
 
+  async getFriendRecommendations(botExternalId: string): Promise<any[]> {
+    const api = this.instances.get(botExternalId) as {
+      getFriendRecommendations?: () => Promise<{ recommItems?: any[] }>;
+    } | undefined;
+    if (typeof api?.getFriendRecommendations !== 'function') return [];
+    try {
+      const res = await api.getFriendRecommendations();
+      const items = res?.recommItems || [];
+      return items
+        .filter((item: any) => item?.dataInfo?.recommType === 1) // RecommendedFriend
+        .map((item: any) => {
+          const info = item.dataInfo;
+          return {
+            userId: info.userId,
+            displayName: info.displayName || info.zaloName || 'Zalo User',
+            avatar: info.avatar || null,
+            message: info.recommInfo?.message || info.recommInfo?.customText || 'Gợi ý kết bạn',
+          };
+        });
+    } catch {
+      return [];
+    }
+  }
+
   async getSentFriendRequests(botExternalId: string): Promise<any[]> {
     const api = this.instances.get(botExternalId) as {
       getSentFriendRequest?: () => Promise<Record<string, any>>;
@@ -190,6 +214,19 @@ export class ZaloZcaService {
         avatar: info.avatar || null,
         message: info.fReqInfo?.message || '',
       }));
+    } catch {
+      return [];
+    }
+  }
+
+  async getFriendOnlines(botExternalId: string): Promise<string[]> {
+    const api = this.instances.get(botExternalId) as {
+      getFriendOnlines?: () => Promise<{ onlines?: Array<{ userId: string; status: string }> }>;
+    } | undefined;
+    if (typeof api?.getFriendOnlines !== 'function') return [];
+    try {
+      const res = await api.getFriendOnlines();
+      return (res?.onlines || []).map((o: any) => o.userId);
     } catch {
       return [];
     }

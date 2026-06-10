@@ -18,6 +18,23 @@ export class ContactsService {
 
   async getContacts(channel: ChannelType, externalId: string): Promise<Contact[]> {
     const bot = await this.bots.getByExternal(channel, externalId);
+    if (channel === ChannelType.zalo) {
+      try {
+        const onlineIds = await this.zca.getFriendOnlines(bot.externalId);
+        await this.prisma.$transaction([
+          this.prisma.contact.updateMany({
+            where: { botId: bot.id, isOnline: true },
+            data: { isOnline: false },
+          }),
+          this.prisma.contact.updateMany({
+            where: { botId: bot.id, externalId: { in: onlineIds } },
+            data: { isOnline: true },
+          }),
+        ]);
+      } catch (err) {
+        console.error('Failed to sync friend online status:', err);
+      }
+    }
     return this.prisma.contact.findMany({
       where: { botId: bot.id },
       orderBy: { name: 'asc' },
@@ -38,6 +55,14 @@ export class ContactsService {
     }
     const bot = await this.bots.getByExternal(channel, externalId);
     return this.zca.getSentFriendRequests(bot.externalId);
+  }
+
+  async getFriendRecommendations(channel: ChannelType, externalId: string): Promise<any[]> {
+    if (channel !== ChannelType.zalo) {
+      throw new Error('Get friend recommendations is only supported for Zalo');
+    }
+    const bot = await this.bots.getByExternal(channel, externalId);
+    return this.zca.getFriendRecommendations(bot.externalId);
   }
 
   async acceptFriendRequest(channel: ChannelType, externalId: string, requestId: number): Promise<Contact> {

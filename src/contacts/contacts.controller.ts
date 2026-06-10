@@ -33,6 +33,14 @@ export class ContactsController {
     return this.contacts.getSentFriendRequests(channel, externalId);
   }
 
+  @Get('recommendations')
+  getFriendRecommendations(
+    @Param('channel') channel: ChannelType,
+    @Param('externalId') externalId: string,
+  ) {
+    return this.contacts.getFriendRecommendations(channel, externalId);
+  }
+
   @Post('requests/:requestId/accept')
   accept(
     @Param('channel') channel: ChannelType,
