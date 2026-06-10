@@ -42,6 +42,14 @@ export class ZaloZcaService {
     return `${days} ngày trước`;
   }
 
+  private cleanRecommMessage(msg: any, defaultText: string): string {
+    if (!msg) return defaultText;
+    if (typeof msg === 'object') return defaultText;
+    const str = String(msg).trim();
+    if (str.startsWith('{') && str.endsWith('}')) return defaultText;
+    return str;
+  }
+
   private async resolveThreadId(botExternalId: string, threadId: string): Promise<string> {
     if (/^\d+$/.test(threadId) && threadId.length < 10) {
       const contactId = parseInt(threadId, 10);
@@ -168,7 +176,7 @@ export class ZaloZcaService {
             userId: info.userId,
             displayName: info.displayName || info.zaloName || 'Zalo User',
             avatar: info.avatar || null,
-            message: info.recommInfo?.message || info.recommInfo?.customText || '',
+            message: this.cleanRecommMessage(info.recommInfo?.message || info.recommInfo?.customText, ''),
           };
         });
     } catch {
@@ -192,7 +200,7 @@ export class ZaloZcaService {
             userId: info.userId,
             displayName: info.displayName || info.zaloName || 'Zalo User',
             avatar: info.avatar || null,
-            message: info.recommInfo?.message || info.recommInfo?.customText || 'Gợi ý kết bạn',
+            message: this.cleanRecommMessage(info.recommInfo?.message || info.recommInfo?.customText, 'Gợi ý kết bạn'),
           };
         });
     } catch {
@@ -229,6 +237,85 @@ export class ZaloZcaService {
       return (res?.onlines || []).map((o: any) => o.userId);
     } catch {
       return [];
+    }
+  }
+
+  async sendSeenEvent(
+    botExternalId: string,
+    threadId: string,
+    threadType: number,
+    rawMessage: any,
+  ): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api || typeof api.sendSeenEvent !== 'function') return null;
+    try {
+      const payload = rawMessage.data || rawMessage;
+      const msgParams = {
+        msgId: String(payload.msgId || ''),
+        cliMsgId: String(payload.cliMsgId || '0'),
+        uidFrom: String(payload.uidFrom || rawMessage.senderId || ''),
+        idTo: String(payload.idTo || threadId),
+        msgType: String(payload.msgType || 'webchat'),
+        st: payload.st !== undefined ? payload.st : 1,
+        at: payload.at !== undefined ? payload.at : 5,
+        cmd: payload.cmd !== undefined ? payload.cmd : -1,
+        ts: String(payload.ts || Date.now()),
+      };
+      return await api.sendSeenEvent(msgParams, threadType);
+    } catch (err) {
+      console.error('[ZaloZcaService.sendSeenEvent] Error:', err);
+      return null;
+    }
+  }
+
+  async sendDeliveredEvent(
+    botExternalId: string,
+    threadId: string,
+    threadType: number,
+    rawMessage: any,
+  ): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api || typeof api.sendDeliveredEvent !== 'function') return null;
+    try {
+      const payload = rawMessage.data || rawMessage;
+      const msgParams = {
+        msgId: String(payload.msgId || ''),
+        cliMsgId: String(payload.cliMsgId || '0'),
+        uidFrom: String(payload.uidFrom || rawMessage.senderId || ''),
+        idTo: String(payload.idTo || threadId),
+        msgType: String(payload.msgType || 'webchat'),
+        st: payload.st !== undefined ? payload.st : 1,
+        at: payload.at !== undefined ? payload.at : 5,
+        cmd: payload.cmd !== undefined ? payload.cmd : -1,
+        ts: String(payload.ts || Date.now()),
+      };
+      return await api.sendDeliveredEvent(false, msgParams, threadType);
+    } catch (err) {
+      console.error('[ZaloZcaService.sendDeliveredEvent] Error:', err);
+      return null;
+    }
+  }
+
+  async forwardMessage(
+    botExternalId: string,
+    message: string,
+    reference: any | undefined,
+    targetThreadIds: string[],
+    targetThreadType: number,
+  ): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api || typeof api.forwardMessage !== 'function') {
+      throw new Error(`forwardMessage not supported by bot: ${botExternalId}`);
+    }
+    try {
+      const payload = {
+        message,
+        reference,
+      };
+      return await api.forwardMessage(payload, targetThreadIds, targetThreadType);
+    } catch (err) {
+      console.error('[ZaloZcaService.forwardMessage] Error:', err);
+      throw err;
     }
   }
 

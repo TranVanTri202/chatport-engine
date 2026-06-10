@@ -38,6 +38,20 @@ export class PinMessageDto {
   messageExternalId!: string;
 }
 
+export class ForwardMessageDto {
+  @IsString()
+  botExternalId!: string;
+
+  @IsString()
+  messageExternalId!: string;
+
+  @IsString()
+  targetThreadId!: string;
+
+  @IsString()
+  targetThreadType!: 'user' | 'group';
+}
+
 export class UnpinMessageDto {
   @IsString()
   botExternalId!: string;
@@ -277,5 +291,10 @@ export class MessagesController {
       body.topicId,
     );
     return { success: true };
+  }
+
+  @Post('forward')
+  async forwardMessage(@Body() body: ForwardMessageDto) {
+    return this.messages.forwardMessage(body);
   }
 }

@@ -84,6 +84,15 @@ export class ZaloListeners {
 
     const inbound = this.normalizer.normalizeMessage({ botExternalId, raw });
     await this.publisher.publishInbound(inbound);
+
+    const isSelf = String(payload.uidFrom ?? raw.senderId ?? '') === botExternalId;
+    if (!isSelf) {
+      const threadTypeNum = (raw.threadType === 'group' || String(raw.threadType) === '1' || (raw as any).type === 1) ? 1 : 0;
+      const threadId = String(raw.threadId ?? payload.uidFrom ?? payload.idTo ?? '');
+      if (threadId) {
+        void this.zca.sendDeliveredEvent(botExternalId, threadId, threadTypeNum, raw);
+      }
+    }
   }
 
   /** Dispatch friend_event: types 0-7 → friendListener, types 10-11 → userchatListener */

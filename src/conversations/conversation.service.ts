@@ -427,6 +427,33 @@ export class ConversationService {
 
   async markRead(id: number): Promise<void> {
     await this.repo.updateUnread(id, 0);
+
+    try {
+      const convo = await this.prisma.conversation.findUnique({
+        where: { id },
+        include: { bot: true },
+      });
+      if (convo && convo.bot.channel === 'zalo') {
+        const lastInboundMsg = await this.prisma.message.findFirst({
+          where: {
+            conversationId: id,
+            direction: 'in',
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (lastInboundMsg && lastInboundMsg.raw) {
+          const threadTypeNum = convo.threadType === 'group' ? 1 : 0;
+          void this.zaloZcaService.sendSeenEvent(
+            convo.bot.externalId,
+            convo.threadExternalId,
+            threadTypeNum,
+            lastInboundMsg.raw,
+          );
+        }
+      }
+    } catch (err) {
+      console.error(`Failed to send seen event for conversation ${id}:`, err);
+    }
   }
 
   async updateAutoReply(id: number, autoReplyEnabled: boolean): Promise<void> {

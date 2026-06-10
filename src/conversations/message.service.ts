@@ -163,4 +163,60 @@ export class MessageService {
       nextCursor: hasMore ? items[items.length - 1]!.id.toString() : null,
     };
   }
+
+  async forwardMessage(input: {
+    botExternalId: string;
+    messageExternalId: string;
+    targetThreadId: string;
+    targetThreadType: 'user' | 'group';
+  }) {
+    const msg = await this.prisma.message.findFirst({
+      where: {
+        messageExternalId: input.messageExternalId,
+      },
+      include: {
+        conversation: {
+          include: { bot: true }
+        }
+      }
+    });
+
+    if (!msg) {
+      throw new Error(`Message ${input.messageExternalId} not found`);
+    }
+
+    const text = msg.text || '';
+    let reference: any = undefined;
+
+    if (msg.messageExternalId) {
+      let originalTs = Date.now();
+      try {
+        const raw = msg.raw as any;
+        const payload = raw?.data || raw;
+        if (payload?.ts) {
+          originalTs = Number(payload.ts);
+        } else if (msg.createdAt) {
+          originalTs = msg.createdAt.getTime();
+        }
+      } catch {}
+
+      reference = {
+        id: msg.messageExternalId,
+        ts: originalTs,
+        logSrcType: 1,
+        fwLvl: 1,
+      };
+    }
+
+    const targetThreadTypeNum = input.targetThreadType === 'group' ? 1 : 0;
+    const result = await this.zaloZcaService.forwardMessage(
+      input.botExternalId,
+      text,
+      reference,
+      [input.targetThreadId],
+      targetThreadTypeNum,
+    );
+
+    return { success: true, result };
+  }
 }
