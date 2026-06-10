@@ -29,6 +29,7 @@ enum MessageDirection {
 
 enum MessageType {
   chat
+  webchat
   image
   video
   file

@@ -75,7 +75,7 @@ export class MessagesController {
         botExternalId: body.botExternalId,
         threadId: body.threadId,
         threadType: body.threadType,
-        type: MessageType.chat,
+        type: MessageType.webchat,
         text: body.text,
         quote: body.quoteMessageExternalId ? { messageExternalId: body.quoteMessageExternalId } : undefined,
       }),

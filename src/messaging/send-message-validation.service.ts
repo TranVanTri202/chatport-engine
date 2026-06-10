@@ -5,11 +5,15 @@ import { SendMessageCommand } from './commands/send-message.command';
 @Injectable()
 export class SendMessageValidationService {
   validate(input: SendMessageCommand['input']): void {
-    if (input.type !== MessageType.chat && input.type !== MessageType.image) {
-      throw new BadRequestException('Currently only chat and image messages are supported');
+    const isTextType =
+      input.type === MessageType.webchat ||
+      input.type === MessageType.chat;
+
+    if (!isTextType && input.type !== MessageType.image) {
+      throw new BadRequestException('Currently only webchat (text) and image messages are supported');
     }
 
-    if (input.type === MessageType.chat) {
+    if (isTextType) {
       this.validateChat(input.text, input.attachments?.length ?? 0);
       return;
     }

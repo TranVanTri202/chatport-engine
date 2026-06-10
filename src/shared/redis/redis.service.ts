@@ -10,6 +10,14 @@ else
 end
 `;
 
+const RATE_LIMIT_LUA = `
+local count = redis.call("INCR", KEYS[1])
+if count == 1 then
+  redis.call("EXPIRE", KEYS[1], ARGV[1])
+end
+return count
+`;
+
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RedisService.name);
@@ -51,5 +59,25 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   async cacheSet(key: string, value: unknown, ttlSec: number): Promise<void> {
     await this.client.set(key, JSON.stringify(value), 'EX', ttlSec);
+  }
+
+  /**
+   * Atomic sliding-window rate limit check using a Lua script.
+   * Increments the counter and sets TTL on first access.
+   *
+   * @returns true if the action is allowed (under limit), false if exceeded.
+   */
+  async checkRateLimit(
+    key: string,
+    windowSec: number,
+    maxRequests: number,
+  ): Promise<boolean> {
+    const count = (await this.client.eval(
+      RATE_LIMIT_LUA,
+      1,
+      key,
+      String(windowSec),
+    )) as number;
+    return count <= maxRequests;
   }
 }

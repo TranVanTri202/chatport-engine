@@ -83,6 +83,7 @@ export class TelegramAdapter implements IChannelAdapter, OnModuleInit {
   private async sendByType(bot: any, msg: OutboundMessage): Promise<void> {
     switch (msg.type) {
       case 'chat':
+      case 'webchat':
         return this.sendText(bot, msg.threadId, msg.text);
       case 'image':
         return this.sendImage(bot, msg.threadId, msg.text, msg.attachments);

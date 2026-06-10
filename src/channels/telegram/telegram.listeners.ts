@@ -37,7 +37,7 @@ export class TelegramListeners {
       senderName: [from.first_name, from.last_name].filter(Boolean).join(' ') || from.username,
       messageExternalId: String(message.message_id ?? `${Date.now()}`),
       timestamp: Number(message.date ? message.date * 1000 : Date.now()),
-      type: typeof text === 'string' ? 'chat' : 'unknown',
+      type: typeof text === 'string' ? 'webchat' : 'unknown',
       text: typeof text === 'string' ? text : undefined,
       attachments: [],
       raw: { message, update: ctx.update },

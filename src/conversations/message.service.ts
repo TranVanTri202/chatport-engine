@@ -66,7 +66,7 @@ export class MessageService {
   private resolveMessageType(msg: InboundMessageDto): MessageType {
     if (msg.type === 'pin') return 'pin';
     if (msg.type === 'unknown') return 'unknown';
-    if (msg.attachments.length === 0) return 'chat';
+    if (msg.attachments.length === 0) return 'webchat';
     const types = new Set(msg.attachments.map((a) => a.type));
     if (types.has('image')) return 'image';
     if (types.has('video')) return 'video';

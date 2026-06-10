@@ -8,6 +8,12 @@ import { ZaloInstanceRegistry } from './zalo-instance.registry';
 import { ZaloSessionService } from './zalo-session.service';
 import { ZaloNormalizer } from './zalo.normalizer';
 import { ZaloListeners } from './zalo.listeners';
+import { ZaloFriendListener } from './listeners/zalo-friend.listener';
+import { ZaloUserchatListener } from './listeners/zalo-userchat.listener';
+import { ZaloReactionListener } from './listeners/zalo-reaction.listener';
+import { ZaloGroupListener } from './listeners/zalo-group.listener';
+import { ZaloUndoListener } from './listeners/zalo-undo.listener';
+import { ZaloTypingListener } from './listeners/zalo-typing.listener';
 import { ZaloQrStorageService } from './zalo-qr-storage.service';
 import { ZaloZcaService } from './zalo-zca.service';
 
@@ -20,6 +26,12 @@ import { ZaloZcaService } from './zalo-zca.service';
     ZaloSessionService,
     ZaloNormalizer,
     ZaloListeners,
+    ZaloFriendListener,
+    ZaloUserchatListener,
+    ZaloReactionListener,
+    ZaloGroupListener,
+    ZaloUndoListener,
+    ZaloTypingListener,
     ZaloQrStorageService,
     ZaloZcaService,
   ],

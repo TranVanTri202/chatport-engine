@@ -375,7 +375,7 @@ export class ZaloZcaService {
       return url;
     };
 
-    if (msg.type === 'chat') {
+    if (msg.type === 'chat' || msg.type === 'webchat') {
       if (!msg.text?.trim()) {
         throw new Error('Text is required for chat messages');
       }
@@ -555,17 +555,17 @@ export class ZaloZcaService {
     let cliMsgId = '0';
 
     try {
-      const bot = await (this.prisma as any).bot.findUnique({
+      const bot = await this.prisma.bot.findUnique({
         where: { channel_externalId: { channel: 'zalo', externalId: botExternalId } },
         select: { id: true },
       });
       if (bot) {
-        const conversation = await (this.prisma as any).conversation.findFirst({
+        const conversation = await this.prisma.conversation.findFirst({
           where: { botId: bot.id, threadExternalId: threadId },
           select: { id: true },
         });
         if (conversation) {
-          const message = await (this.prisma as any).message.findUnique({
+          const message = await this.prisma.message.findUnique({
             where: {
               conversationId_messageExternalId: {
                 conversationId: conversation.id,
@@ -639,17 +639,17 @@ export class ZaloZcaService {
     let cliMsgId = '0';
 
     try {
-      const bot = await (this.prisma as any).bot.findUnique({
+      const bot = await this.prisma.bot.findUnique({
         where: { channel_externalId: { channel: 'zalo', externalId: botExternalId } },
         select: { id: true },
       });
       if (bot) {
-        const conversation = await (this.prisma as any).conversation.findFirst({
+        const conversation = await this.prisma.conversation.findFirst({
           where: { botId: bot.id, threadExternalId: threadId },
           select: { id: true },
         });
         if (conversation) {
-          const message = await (this.prisma as any).message.findUnique({
+          const message = await this.prisma.message.findUnique({
             where: {
               conversationId_messageExternalId: {
                 conversationId: conversation.id,
@@ -782,19 +782,19 @@ export class ZaloZcaService {
       });
     }
 
-    const bot = await (this.prisma as any).bot.findUnique({
+    const bot = await this.prisma.bot.findUnique({
       where: { channel_externalId: { channel: 'zalo', externalId: botExternalId } },
       select: { id: true },
     });
     if (!bot) throw new Error('Bot not found');
 
-    const conversation = await (this.prisma as any).conversation.findFirst({
+    const conversation = await this.prisma.conversation.findFirst({
       where: { botId: bot.id, threadExternalId: threadId },
       select: { id: true },
     });
     if (!conversation) throw new Error('Conversation not found');
 
-    const message = await (this.prisma as any).message.findUnique({
+    const message = await this.prisma.message.findUnique({
       where: {
         conversationId_messageExternalId: {
           conversationId: conversation.id,
@@ -804,7 +804,7 @@ export class ZaloZcaService {
     });
     if (!message) throw new Error('Message not found');
 
-    const participant = await (this.prisma as any).participant.findFirst({
+    const participant = await this.prisma.participant.findFirst({
       where: { conversationId: conversation.id, externalId: message.senderExternalId || undefined },
       select: { displayName: true },
     });

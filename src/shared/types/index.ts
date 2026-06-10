@@ -11,6 +11,7 @@ export enum ThreadType {
 
 export enum MessageType {
   chat = 'chat',
+  webchat = 'webchat',
   image = 'image',
   video = 'video',
   file = 'file',

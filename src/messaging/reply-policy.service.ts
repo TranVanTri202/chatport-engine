@@ -20,8 +20,8 @@ export class ReplyPolicyService {
     // Bot never replies to itself.
     if (inbound.isSelf) return false;
 
-    // Only plain chat messages trigger bot replies.
-    if (inbound.type !== 'chat') return false;
+    // Only webchat (plain text) messages trigger bot replies.
+    if (inbound.type !== 'webchat' && inbound.type !== 'chat') return false;
 
     const text = inbound.text?.trim();
     if (!text) return false;

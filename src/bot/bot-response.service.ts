@@ -3,6 +3,7 @@ import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter';
 import { Bot } from '@prisma/client';
 import { ChannelType, MessageType, ThreadType } from '@/shared/types';
 import { AppConfig } from '@/shared/config/app.config';
+import { RedisService } from '@/shared/redis/redis.service';
 import {
   DOMAIN_EVENTS,
   MessageReceivedEvent,
@@ -12,10 +13,14 @@ import { MessagingPublisher } from '@/messaging/messaging.publisher';
 import { ReplyPolicyService } from '@/messaging/reply-policy.service';
 import { MessageService } from '@/conversations/message.service';
 import { ConversationService } from '@/conversations/conversation.service';
-import { RetrievalService } from '@/rag/retrieval.service';
+import { RetrievalService, RetrievedChunk } from '@/rag/retrieval.service';
 import { LlmService } from '@/llm/llm.service';
 import { LlmCallOverrides } from '@/llm/llm-settings';
 import { QuotaService } from '@/quota/quota.service';
+
+/** Max auto-replies per conversation per window. Prevents spam loops. */
+const REPLY_RATE_WINDOW_SEC = 60;
+const REPLY_RATE_MAX = 5;
 
 /**
  * Reacts to `message.received` events: decides whether to auto-reply, builds
@@ -39,6 +44,7 @@ export class BotResponseService {
     private readonly config: AppConfig,
     private readonly policy: ReplyPolicyService,
     private readonly quota: QuotaService,
+    private readonly redis: RedisService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -81,6 +87,20 @@ export class BotResponseService {
     if (!conversation.autoReplyEnabled) return;
     if (!this.policy.shouldConsider({ bot, conversation, inbound })) return;
 
+    // Per-conversation rate limit: prevent reply spam loops
+    const rateLimitKey = `ratelimit:reply:${conversation.id}`;
+    const allowed = await this.redis.checkRateLimit(
+      rateLimitKey,
+      REPLY_RATE_WINDOW_SEC,
+      REPLY_RATE_MAX,
+    );
+    if (!allowed) {
+      this.logger.warn(
+        `Rate limit hit for conversation ${conversation.id}: ${REPLY_RATE_MAX}/${REPLY_RATE_WINDOW_SEC}s`,
+      );
+      return;
+    }
+
     // Check active hours
     if (!this.isWithinActiveHours(bot.activeHours)) {
       if (bot.fallbackReplies && bot.fallbackReplies.length > 0) {
@@ -93,7 +113,7 @@ export class BotResponseService {
           botExternalId: bot.externalId,
           threadId: conversation.threadExternalId,
           threadType: conversation.threadType as ThreadType,
-          type: MessageType.chat,
+          type: MessageType.webchat,
           text: replyText,
         });
       }
@@ -120,7 +140,7 @@ export class BotResponseService {
         botExternalId: bot.externalId,
         threadId: conversation.threadExternalId,
         threadType: conversation.threadType as ThreadType,
-        type: MessageType.chat,
+        type: MessageType.webchat,
         text: result.reply,
       });
     } catch (err) {
@@ -160,8 +180,26 @@ export class BotResponseService {
     await this.quota.consumeRequest(bot.id);
 
     try {
+      // RAG retrieval with timeout — fall back to no context if slow
       const topK = bot.ragTopK ?? this.config.ragTopKDefault;
-      const contexts = await this.retrieval.search(bot.id, userText, topK);
+      const RAG_TIMEOUT_MS = 3_000;
+      let contexts: RetrievedChunk[] = [];
+      try {
+        contexts = await Promise.race([
+          this.retrieval.search(bot.id, userText, topK),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('RAG_TIMEOUT')), RAG_TIMEOUT_MS),
+          ),
+        ]);
+      } catch (ragErr) {
+        if ((ragErr as Error).message === 'RAG_TIMEOUT') {
+          this.logger.warn(
+            `RAG search timed out (${RAG_TIMEOUT_MS}ms) for bot ${bot.id}, continuing without context`,
+          );
+        } else {
+          throw ragErr;
+        }
+      }
 
       const historyLimit = this.config.conversationHistoryLimit;
       const recentLimit = this.config.conversationRecentLimit;
@@ -197,10 +235,12 @@ export class BotResponseService {
         });
       }
 
+      const ragContext = this.retrieval.formatContext(contexts);
+
       const conversationState = this.buildConversationState({
         botName: bot.name ?? '',
         userText,
-        ragContext: contexts.map((c) => c.content).join('\n---\n'),
+        ragContext,
         recentHistory,
         summary,
       });

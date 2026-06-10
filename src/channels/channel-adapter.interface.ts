@@ -17,6 +17,7 @@ export type AttachmentType =
 
 export type MessageType =
   | 'chat'
+  | 'webchat'
   | 'image'
   | 'video'
   | 'file'

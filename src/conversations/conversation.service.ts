@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Bot, Conversation, Prisma } from '@prisma/client';
 import { ChannelType, ThreadType } from '@/shared/types';
+import { PrismaService } from '@/shared/prisma/prisma.service';
 import { InboundMessageDto } from '@/messaging/dto/inbound-message.dto';
 import { ZaloZcaService } from '@/channels/zalo/zalo-zca.service';
 import { ConversationRepository } from './repositories/conversation.repository';
@@ -28,6 +29,7 @@ export class ConversationService {
   constructor(
     private readonly repo: ConversationRepository,
     private readonly zaloZcaService: ZaloZcaService,
+    private readonly prisma: PrismaService,
   ) {}
 
   /** Resolve the Bot row addressed by (channel, botExternalId). */
@@ -76,7 +78,35 @@ export class ConversationService {
   ): Promise<{ conversation: Conversation; bot: Bot }> {
     const bot = await this.getBotByExternal(msg.channel, msg.botExternalId);
 
-    const senderProfile = await this.resolveUserProfile(msg.channel, msg.botExternalId, msg.senderExternalId);
+    // Fire all independent profile/group lookups in parallel instead of sequentially.
+    // User chat: sender profile + other user profile.
+    // Group chat: sender profile + group info from Zalo.
+    // Non-Zalo channels: resolveUserProfile returns null immediately (no-op).
+    let senderProfile: any = null;
+    let otherProfile: any = null;
+    let groupInfo: any = null;
+
+    if (msg.threadType === 'user') {
+      [senderProfile, otherProfile] = await Promise.all([
+        this.resolveUserProfile(msg.channel, msg.botExternalId, msg.senderExternalId),
+        this.resolveUserProfile(msg.channel, msg.botExternalId, msg.threadId),
+      ]);
+    } else if (msg.threadType === 'group') {
+      const promises: [Promise<any>, Promise<any>] = [
+        this.resolveUserProfile(msg.channel, msg.botExternalId, msg.senderExternalId),
+        Promise.resolve(null),
+      ];
+      if (msg.channel === ChannelType.zalo) {
+        promises[1] = this.zaloZcaService.getGroupInfo(msg.botExternalId, msg.threadId);
+      }
+      [senderProfile, groupInfo] = await Promise.all(promises);
+    } else {
+      senderProfile = await this.resolveUserProfile(
+        msg.channel,
+        msg.botExternalId,
+        msg.senderExternalId,
+      );
+    }
 
     const lastMessageSenderName = senderProfile?.displayName ?? msg.senderName ?? null;
     const lastMessageSenderAvatar = senderProfile?.avatar ?? null;
@@ -87,18 +117,12 @@ export class ConversationService {
 
     if (msg.threadType === 'user') {
       // In direct chat, the conversation belongs to the other person (threadId)
-      const otherProfile = await this.resolveUserProfile(msg.channel, msg.botExternalId, msg.threadId);
       convoTitle = otherProfile?.displayName ?? (msg.isSelf ? null : msg.senderName) ?? null;
       convoAvatar = otherProfile?.avatar ?? null;
-    } else if (msg.threadType === 'group') {
-      if (msg.channel === ChannelType.zalo) {
-        const groupInfo = await this.zaloZcaService.getGroupInfo(msg.botExternalId, msg.threadId);
-        if (groupInfo) {
-          convoTitle = groupInfo.name;
-          convoAvatar = groupInfo.avt;
-          memberCount = groupInfo.totalMember;
-        }
-      }
+    } else if (msg.threadType === 'group' && groupInfo) {
+      convoTitle = groupInfo.name;
+      convoAvatar = groupInfo.avt;
+      memberCount = groupInfo.totalMember;
     }
 
     const conversation = await this.repo.upsertConversationFromInbound({
@@ -177,7 +201,7 @@ export class ConversationService {
     if (!c) throw new NotFoundException(`Conversation ${id} not found`);
 
     // Sync pinned messages if Zalo
-    const bot = await (this.repo as any).prisma.bot.findUnique({
+    const bot = await this.prisma.bot.findUnique({
       where: { id: c.botId },
     });
 

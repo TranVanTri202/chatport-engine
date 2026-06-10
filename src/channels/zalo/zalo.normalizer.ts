@@ -65,21 +65,36 @@ export class ZaloNormalizer {
   }
 
   private resolveMessageType(attachments: InboundAttachment[]): MessageType {
-    if (attachments.length === 0) return 'chat';
+    if (attachments.length === 0) return 'webchat';
     const type = attachments[0]!.type;
     return type === 'image' || type === 'video' || type === 'file' || type === 'voice' || type === 'sticker' || type === 'link'
       ? type
       : 'unknown';
   }
 
+  // ── Content extraction ──────────────────────────────────────────
+
+  /**
+   * Return the first numeric value found, preferring the raw field over
+   * the parsed-params fallback. Handles both `number` and numeric `string`.
+   */
+  private numOrUndef(
+    raw: unknown,
+    fromParams: unknown,
+  ): number | undefined {
+    if (typeof raw === 'number') return raw;
+    if (typeof raw === 'string') { const n = Number(raw); if (!isNaN(n)) return n; }
+    if (typeof fromParams === 'number') return fromParams;
+    if (typeof fromParams === 'string') { const n = Number(fromParams); if (!isNaN(n)) return n; }
+    return undefined;
+  }
+
   private extractContent(input: {
     content: unknown;
     msgType: string;
-  }): {
-    text?: string;
-    attachments: InboundAttachment[];
-  } {
+  }): { text?: string; attachments: InboundAttachment[] } {
     const { content, msgType } = input;
+
     if (typeof content === 'string') {
       return { text: content, attachments: [] };
     }
@@ -90,202 +105,136 @@ export class ZaloNormalizer {
     switch (msgType) {
       case 'chat.photo':
         return { attachments: [{ type: 'image', url: href ?? '' }] };
-      case 'chat.video.msg': {
-        let duration: number | undefined = undefined;
-        let size: number | undefined = undefined;
-
-        if (typeof c.duration === 'number') {
-          duration = c.duration;
-        }
-
-        if (typeof c.fileSize === 'number') {
-          size = c.fileSize;
-        }
-
-        if (typeof c.params === 'string') {
-          try {
-            const parsed = JSON.parse(c.params);
-            if (parsed && typeof parsed === 'object') {
-              if (parsed.duration && !duration) {
-                duration = Number(parsed.duration);
-              }
-              if (parsed.fileSize && !size) {
-                size = Number(parsed.fileSize);
-              }
-            }
-          } catch (e) {}
-        }
-
-        return {
-          attachments: [
-            {
-              type: 'video',
-              url: href ?? '',
-              size,
-              meta: duration ? { duration } : undefined,
-            },
-          ],
-        };
-      }
+      case 'chat.video.msg':
+        return { attachments: [this.extractVideo(c, href)] };
       case 'chat.attach':
-      case 'share.file': {
-        let size: number | undefined = undefined;
-        let mime: string | undefined = undefined;
-
-        if (typeof c.fileSize === 'number') {
-          size = c.fileSize;
-        } else if (typeof c.fileSize === 'string') {
-          size = Number(c.fileSize);
-        }
-
-        if (typeof c.fileType === 'string') {
-          mime = c.fileType;
-        }
-
-        if (typeof c.params === 'string') {
-          try {
-            const parsed = JSON.parse(c.params);
-            if (parsed && typeof parsed === 'object') {
-              if (parsed.fileSize && !size) {
-                size = Number(parsed.fileSize);
-              }
-              if (parsed.fileExt && !mime) {
-                mime = String(parsed.fileExt);
-              }
-            }
-          } catch (e) {}
-        }
-
-        return {
-          attachments: [
-            {
-              type: 'file',
-              url: href ?? '',
-              name: typeof c.title === 'string' ? c.title : (typeof c.name === 'string' ? c.name : undefined),
-              mime,
-              size,
-            },
-          ],
-        };
-      }
-      case 'chat.voice': {
-        let size: number | undefined = undefined;
-        let duration: number | undefined = undefined;
-
-        if (typeof c.fileSize === 'number') {
-          size = c.fileSize;
-        } else if (typeof c.fileSize === 'string') {
-          size = Number(c.fileSize);
-        }
-
-        if (typeof c.duration === 'number') {
-          duration = c.duration;
-        }
-
-        if (typeof c.params === 'string') {
-          try {
-            const parsed = JSON.parse(c.params);
-            if (parsed && typeof parsed === 'object') {
-              if (parsed.fileSize && !size) {
-                size = Number(parsed.fileSize);
-              }
-              if (parsed.duration && !duration) {
-                duration = Number(parsed.duration);
-              }
-            }
-          } catch (e) {}
-        }
-
-        return {
-          attachments: [
-            {
-              type: 'voice',
-              url: href ?? '',
-              size,
-              meta: duration ? { duration } : undefined,
-            },
-          ],
-        };
-      }
+      case 'share.file':
+        return { attachments: [this.extractFile(c, href)] };
+      case 'chat.voice':
+        return { attachments: [this.extractVoice(c, href)] };
       case 'chat.sticker':
         return { attachments: [{ type: 'sticker', meta: c }] };
       case 'chat.link':
         return {
-          attachments: [
-            {
-              type: 'link',
-              url: href ?? '',
-              meta: {
-                title: c.title,
-                thumb: c.thumb,
-                description: c.description,
-              },
-            },
-          ],
+          attachments: [{
+            type: 'link', url: href ?? '',
+            meta: { title: c.title, thumb: c.thumb, description: c.description },
+          }],
         };
-      case 'chat.recommended': {
-        let phone = '';
-        let qrCodeUrl = '';
-        if (typeof c.description === 'string') {
-          try {
-            const parsed = JSON.parse(c.description);
-            if (parsed && typeof parsed === 'object') {
-              phone = parsed.phone || '';
-              qrCodeUrl = parsed.qrCodeUrl || '';
-            }
-          } catch (e) {}
-        }
-
-        return {
-          attachments: [
-            {
-              type: 'link',
-              url: href ?? '',
-              meta: {
-                isCard: true,
-                title: typeof c.title === 'string' ? c.title : '',
-                thumb: typeof c.thumb === 'string' ? c.thumb : '',
-                userId: typeof c.params === 'string' ? c.params : '',
-                phone,
-                qrCodeUrl,
-              },
-            },
-          ],
-        };
-      }
-      case 'chat.location.new': {
-        let lat = '';
-        let lng = '';
-        if (typeof c.params === 'string') {
-          try {
-            const parsed = JSON.parse(c.params);
-            if (parsed && typeof parsed === 'object') {
-              lat = parsed.latitude || '';
-              lng = parsed.longitude || '';
-            }
-          } catch (e) {}
-        }
-        const mapsUrl = (lat && lng) ? `https://www.google.com/maps/search/?api=1&query=${lat},${lng}` : '';
-
-        return {
-          attachments: [
-            {
-              type: 'link',
-              url: mapsUrl,
-              meta: {
-                isLocation: true,
-                title: typeof c.title === 'string' && c.title ? c.title : 'Vị trí',
-                description: typeof c.description === 'string' ? c.description : '',
-                latitude: lat,
-                longitude: lng,
-              },
-            },
-          ],
-        };
-      }
+      case 'chat.recommended':
+        return { attachments: [this.extractRecommended(c, href)] };
+      case 'chat.location.new':
+        return { attachments: [this.extractLocation(c)] };
       default:
         return { attachments: [] };
     }
+  }
+
+  /** Parse c.params as JSON once and reuse across extractors. */
+  private parseParams(c: Record<string, unknown>): Record<string, unknown> {
+    if (typeof c.params !== 'string') return {};
+    try {
+      const parsed = JSON.parse(c.params);
+      return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private extractVideo(
+    c: Record<string, unknown>,
+    href: string | undefined,
+  ): InboundAttachment {
+    const p = this.parseParams(c);
+    return {
+      type: 'video',
+      url: href ?? '',
+      size: this.numOrUndef(c.fileSize, p.fileSize),
+      meta: (this.numOrUndef(c.duration, p.duration) !== undefined
+        ? { duration: this.numOrUndef(c.duration, p.duration) }
+        : undefined),
+    };
+  }
+
+  private extractFile(
+    c: Record<string, unknown>,
+    href: string | undefined,
+  ): InboundAttachment {
+    const p = this.parseParams(c);
+    return {
+      type: 'file',
+      url: href ?? '',
+      name: typeof c.title === 'string' ? c.title
+        : typeof c.name === 'string' ? c.name
+        : undefined,
+      mime: (typeof c.fileType === 'string' ? c.fileType : undefined)
+        ?? (typeof p.fileExt === 'string' ? p.fileExt as string : undefined),
+      size: this.numOrUndef(c.fileSize, p.fileSize),
+    };
+  }
+
+  private extractVoice(
+    c: Record<string, unknown>,
+    href: string | undefined,
+  ): InboundAttachment {
+    const p = this.parseParams(c);
+    return {
+      type: 'voice',
+      url: href ?? '',
+      size: this.numOrUndef(c.fileSize, p.fileSize),
+      meta: (this.numOrUndef(c.duration, p.duration) !== undefined
+        ? { duration: this.numOrUndef(c.duration, p.duration) }
+        : undefined),
+    };
+  }
+
+  private extractRecommended(
+    c: Record<string, unknown>,
+    href: string | undefined,
+  ): InboundAttachment {
+    let phone = '';
+    let qrCodeUrl = '';
+    if (typeof c.description === 'string') {
+      try {
+        const parsed = JSON.parse(c.description);
+        if (parsed && typeof parsed === 'object') {
+          phone = (parsed as Record<string, string>).phone || '';
+          qrCodeUrl = (parsed as Record<string, string>).qrCodeUrl || '';
+        }
+      } catch { /* ignore */ }
+    }
+    return {
+      type: 'link',
+      url: href ?? '',
+      meta: {
+        isCard: true,
+        title: typeof c.title === 'string' ? c.title : '',
+        thumb: typeof c.thumb === 'string' ? c.thumb : '',
+        userId: typeof c.params === 'string' ? c.params : '',
+        phone,
+        qrCodeUrl,
+      },
+    };
+  }
+
+  private extractLocation(c: Record<string, unknown>): InboundAttachment {
+    const p = this.parseParams(c);
+    const lat = String(p.latitude ?? '');
+    const lng = String(p.longitude ?? '');
+    const mapsUrl = (lat && lng)
+      ? `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`
+      : '';
+    return {
+      type: 'link',
+      url: mapsUrl,
+      meta: {
+        isLocation: true,
+        title: typeof c.title === 'string' && c.title ? c.title : 'Vị trí',
+        description: typeof c.description === 'string' ? c.description : '',
+        latitude: lat,
+        longitude: lng,
+      },
+    };
   }
 }
 

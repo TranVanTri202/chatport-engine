@@ -6,6 +6,8 @@ export interface RetrievedChunkRow {
   id: bigint;
   content: string;
   distance: number;
+  documentTitle: string | null;
+  documentSource: string | null;
 }
 
 @Injectable()
@@ -51,12 +53,21 @@ export class DocumentChunkRepository {
     `;
   }
 
-  async searchSimilarity(botId: number, embeddingLiteral: string, k: number): Promise<RetrievedChunkRow[]> {
+  async searchSimilarity(
+    botId: number,
+    embeddingLiteral: string,
+    k: number,
+    minScore = 0.5,
+  ): Promise<RetrievedChunkRow[]> {
     return this.prisma.$queryRaw<RetrievedChunkRow[]>`
-      SELECT dc.id, dc.content, dc.embedding <=> ${embeddingLiteral}::vector AS distance
+      SELECT dc.id, dc.content,
+             dc.embedding <=> ${embeddingLiteral}::vector AS distance,
+             d.title AS "documentTitle",
+             d.source AS "documentSource"
       FROM "DocumentChunk" dc
       JOIN "Document" d ON d.id = dc."documentId"
       WHERE d."botId" = ${botId}
+        AND dc.embedding <=> ${embeddingLiteral}::vector < ${1 - minScore}
       ORDER BY distance ASC
       LIMIT ${k}
     `;

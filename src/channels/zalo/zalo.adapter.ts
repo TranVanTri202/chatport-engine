@@ -172,53 +172,64 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
       this.logger.log(`Syncing friends list for botId=${botId} (${botExternalId})`);
       const friends = await this.zca.getAllFriends(botExternalId);
       this.logger.log(`Found ${friends.length} friends for botId=${botId}`);
-      for (const friend of friends) {
-        const newZaloName = friend.zaloName || null;
-        const defaultName = friend.displayName || friend.zaloName || friend.username || 'Zalo Friend';
-
-        // Lấy contact hiện tại để kiểm tra biệt danh
-        const existing = await this.prisma.contact.findUnique({
-          where: { botId_externalId: { botId, externalId: friend.userId } },
-          select: { name: true, zaloName: true },
+      if (friends.length === 0) {
+        this.logger.log(`No friends to sync for botId=${botId}`);
+      } else {
+        // Batch-read all existing contacts in ONE query (eliminates N findUnique)
+        const friendIds = friends.map((f) => f.userId);
+        const existingContacts = await this.prisma.contact.findMany({
+          where: { botId, externalId: { in: friendIds } },
+          select: { externalId: true, name: true, zaloName: true },
         });
+        const existingMap = new Map(
+          existingContacts.map((c) => [c.externalId, c]),
+        );
 
-        // Chỉ cập nhật name nếu chưa có biệt danh
-        // (biệt danh = name khác với zaloName cũ)
-        const hasCustomAlias = existing && existing.zaloName && existing.name !== existing.zaloName;
-        const nameToSet = hasCustomAlias ? existing!.name : defaultName;
+        // Batch all upserts in a single transaction
+        const upserts = friends.map((friend) => {
+          const newZaloName = friend.zaloName || null;
+          const defaultName =
+            friend.displayName || friend.zaloName || friend.username || 'Zalo Friend';
+          const existing = existingMap.get(friend.userId);
+          const hasCustomAlias =
+            existing && existing.zaloName && existing.name !== existing.zaloName;
+          const nameToSet = hasCustomAlias ? existing!.name : defaultName;
 
-        await this.prisma.contact.upsert({
-          where: {
-            botId_externalId: {
+          return this.prisma.contact.upsert({
+            where: {
+              botId_externalId: {
+                botId,
+                externalId: friend.userId,
+              },
+            },
+            create: {
               botId,
               externalId: friend.userId,
+              name: defaultName,
+              avatar: friend.avatar || null,
+              phone: friend.phoneNumber || null,
+              cover: friend.cover || null,
+              gender: friend.gender !== undefined ? friend.gender : null,
+              dob: friend.sdob || (friend.dob ? String(friend.dob) : null),
+              signature: friend.status || null,
+              zaloName: newZaloName,
+              isFriend: true,
             },
-          },
-          create: {
-            botId,
-            externalId: friend.userId,
-            name: defaultName,
-            avatar: friend.avatar || null,
-            phone: friend.phoneNumber || null,
-            cover: friend.cover || null,
-            gender: friend.gender !== undefined ? friend.gender : null,
-            dob: friend.sdob || (friend.dob ? String(friend.dob) : null),
-            signature: friend.status || null,
-            zaloName: newZaloName,
-            isFriend: true,
-          },
-          update: {
-            name: nameToSet,
-            avatar: friend.avatar || null,
-            phone: friend.phoneNumber || null,
-            cover: friend.cover || null,
-            gender: friend.gender !== undefined ? friend.gender : null,
-            dob: friend.sdob || (friend.dob ? String(friend.dob) : null),
-            signature: friend.status || null,
-            zaloName: newZaloName,
-            isFriend: true,
-          },
+            update: {
+              name: nameToSet,
+              avatar: friend.avatar || null,
+              phone: friend.phoneNumber || null,
+              cover: friend.cover || null,
+              gender: friend.gender !== undefined ? friend.gender : null,
+              dob: friend.sdob || (friend.dob ? String(friend.dob) : null),
+              signature: friend.status || null,
+              zaloName: newZaloName,
+              isFriend: true,
+            },
+          });
         });
+
+        await this.prisma.$transaction(upserts);
       }
       this.logger.log(`Successfully synced friends list for botId=${botId}`);
 
@@ -240,27 +251,30 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
         });
       }
 
-      for (const req of requests) {
-        await this.prisma.friendRequest.upsert({
-          where: {
-            botId_externalId: {
+      if (requests.length === 0) {
+        this.logger.log(`No incoming friend requests for botId=${botId}`);
+      } else {
+        // Batch all friend request upserts in a single transaction
+        const reqUpserts = requests.map((req) =>
+          this.prisma.friendRequest.upsert({
+            where: {
+              botId_externalId: { botId, externalId: req.userId },
+            },
+            create: {
               botId,
               externalId: req.userId,
+              name: req.displayName,
+              avatar: req.avatar,
+              source: req.message || 'Zalo Request',
             },
-          },
-          create: {
-            botId,
-            externalId: req.userId,
-            name: req.displayName,
-            avatar: req.avatar,
-            source: req.message || 'Zalo Request',
-          },
-          update: {
-            name: req.displayName,
-            avatar: req.avatar,
-            source: req.message || 'Zalo Request',
-          },
-        });
+            update: {
+              name: req.displayName,
+              avatar: req.avatar,
+              source: req.message || 'Zalo Request',
+            },
+          }),
+        );
+        await this.prisma.$transaction(reqUpserts);
       }
       this.logger.log(`Successfully synced friend requests for botId=${botId}`);
     } catch (error) {
@@ -273,46 +287,80 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
       this.logger.log(`Syncing groups list for botId=${botId} (${botExternalId})`);
       const groupIds = await this.zca.getAllGroups(botExternalId);
       this.logger.log(`Found ${groupIds.length} groups for botId=${botId}`);
-      for (const groupId of groupIds) {
-        const groupInfo = await this.zca.getGroupInfo(botExternalId, groupId);
-        if (groupInfo) {
-          // Find or create conversation
-          const conversation = await this.prisma.conversation.upsert({
-            where: {
-              botId_threadExternalId: {
-                botId,
-                threadExternalId: groupId,
-              },
-            },
-            create: {
-              botId,
-              threadType: 'group',
-              threadExternalId: groupId,
-              title: groupInfo.name || 'Zalo Group',
-              avatar: groupInfo.avt || null,
-              lastMessageAt: new Date(0),
-              metadata: {
-                memberCount: groupInfo.totalMember || 0,
-              },
-            },
-            update: {
-              title: groupInfo.name || undefined,
-              avatar: groupInfo.avt || undefined,
-            },
-          });
+      if (groupIds.length === 0) {
+        this.logger.log(`No groups to sync for botId=${botId}`);
+        return;
+      }
 
-          // Shallow merge metadata
-          const existingMeta = (conversation.metadata as Record<string, any>) || {};
-          await this.prisma.conversation.update({
-            where: { id: conversation.id },
-            data: {
-              metadata: {
-                ...existingMeta,
-                memberCount: groupInfo.totalMember || 0,
+      // Phase 1: fetch group info in parallel with concurrency limit
+      const CONCURRENCY = 5;
+      const groupInfos: Array<{ groupId: string; info: any }> = [];
+      for (let i = 0; i < groupIds.length; i += CONCURRENCY) {
+        const batch = groupIds.slice(i, i + CONCURRENCY);
+        const results = await Promise.all(
+          batch.map(async (groupId) => {
+            try {
+              const info = await this.zca.getGroupInfo(botExternalId, groupId);
+              return { groupId, info };
+            } catch {
+              return { groupId, info: null };
+            }
+          }),
+        );
+        groupInfos.push(...results);
+      }
+
+      // Phase 2: batch-read existing conversations (1 query)
+      const existingConvos = await this.prisma.conversation.findMany({
+        where: { botId, threadExternalId: { in: groupIds } },
+        select: { id: true, threadExternalId: true, metadata: true },
+      });
+      const convoMap = new Map(
+        existingConvos.map((c) => [c.threadExternalId, c]),
+      );
+
+      // Phase 3: build upsert operations + metadata merges in a single transaction
+      const operations: Array<any> = [];
+      for (const { groupId, info } of groupInfos) {
+        if (!info) continue;
+
+        const existing = convoMap.get(groupId);
+        const baseMetadata = (existing?.metadata as Record<string, any>) ?? {};
+        const mergedMetadata = {
+          ...baseMetadata,
+          memberCount: info.totalMember || 0,
+        };
+
+        if (existing) {
+          operations.push(
+            this.prisma.conversation.update({
+              where: { id: existing.id },
+              data: {
+                title: info.name ?? undefined,
+                avatar: info.avt ?? undefined,
+                metadata: mergedMetadata,
               },
-            },
-          });
+            }),
+          );
+        } else {
+          operations.push(
+            this.prisma.conversation.create({
+              data: {
+                botId,
+                threadType: 'group',
+                threadExternalId: groupId,
+                title: info.name || 'Zalo Group',
+                avatar: info.avt || null,
+                lastMessageAt: new Date(0),
+                metadata: mergedMetadata,
+              },
+            }),
+          );
         }
+      }
+
+      if (operations.length > 0) {
+        await this.prisma.$transaction(operations);
       }
       this.logger.log(`Successfully synced groups list for botId=${botId}`);
     } catch (error) {
