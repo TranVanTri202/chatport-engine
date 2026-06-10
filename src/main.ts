@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { Logger as PinoLogger } from 'nestjs-pino';
+import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import { AppConfig } from '@/shared/config/app.config';
 import { installBigIntJsonSerializer } from '@/shared/utils/bigint-serializer';
@@ -12,6 +13,9 @@ installBigIntJsonSerializer();
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   app.useLogger(app.get(PinoLogger));
+
+  app.use(json({ limit: '10mb' }));
+  app.use(urlencoded({ limit: '10mb', extended: true }));
 
   app.setGlobalPrefix('api/v1');
 

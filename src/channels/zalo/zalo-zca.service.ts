@@ -513,6 +513,18 @@ export class ZaloZcaService {
     }
   }
 
+  async getGroupMembersInfo(botExternalId: string, memberIds: string[]): Promise<any | null> {
+    const api = this.instances.get(botExternalId) as {
+      getGroupMembersInfo?: (memberIds: string[]) => Promise<{ profiles?: Record<string, any> }>;
+    } | undefined;
+    if (typeof api?.getGroupMembersInfo !== 'function') return null;
+    try {
+      return await api.getGroupMembersInfo(memberIds);
+    } catch {
+      return null;
+    }
+  }
+
   async getAllGroups(botExternalId: string): Promise<string[]> {
     const api = this.instances.get(botExternalId) as {
       getAllGroups?: () => Promise<{ gridVerMap?: Record<string, string> }>;
@@ -975,4 +987,176 @@ export class ZaloZcaService {
       return [];
     }
   }
+
+  async createGroup(
+    botExternalId: string,
+    options: { name: string; members: string[]; avatarSource?: any },
+  ): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api || typeof api.createGroup !== 'function') {
+      throw new Error(`createGroup not supported by bot: ${botExternalId}`);
+    }
+    return api.createGroup({
+      name: options.name,
+      members: options.members,
+      avatarSource: options.avatarSource,
+    });
+  }
+
+  async leaveGroup(botExternalId: string, groupId: string): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api || typeof api.leaveGroup !== 'function') {
+      throw new Error(`leaveGroup not supported by bot: ${botExternalId}`);
+    }
+    return api.leaveGroup(groupId);
+  }
+
+  async disperseGroup(botExternalId: string, groupId: string): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api || typeof api.disperseGroup !== 'function') {
+      throw new Error(`disperseGroup not supported by bot: ${botExternalId}`);
+    }
+    return api.disperseGroup(groupId);
+  }
+
+  async removeUserFromGroup(
+    botExternalId: string,
+    groupId: string,
+    memberId: string | string[],
+  ): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api || typeof api.removeUserFromGroup !== 'function') {
+      throw new Error(`removeUserFromGroup not supported by bot: ${botExternalId}`);
+    }
+    return api.removeUserFromGroup(memberId, groupId);
+  }
+
+  async inviteUserToGroups(
+    botExternalId: string,
+    groupId: string | string[],
+    userId: string,
+  ): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api || typeof api.inviteUserToGroups !== 'function') {
+      throw new Error(`inviteUserToGroups not supported by bot: ${botExternalId}`);
+    }
+    return api.inviteUserToGroups(userId, groupId);
+  }
+
+  async changeGroupOwner(
+    botExternalId: string,
+    groupId: string,
+    memberId: string,
+  ): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api || typeof api.changeGroupOwner !== 'function') {
+      throw new Error(`changeGroupOwner not supported by bot: ${botExternalId}`);
+    }
+    return api.changeGroupOwner(memberId, groupId);
+  }
+
+  async addGroupDeputy(
+    botExternalId: string,
+    groupId: string,
+    memberId: string | string[],
+  ): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api || typeof api.addGroupDeputy !== 'function') {
+      throw new Error(`addGroupDeputy not supported by bot: ${botExternalId}`);
+    }
+    return api.addGroupDeputy(memberId, groupId);
+  }
+
+  async removeGroupDeputy(
+    botExternalId: string,
+    groupId: string,
+    memberId: string | string[],
+  ): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api || typeof api.removeGroupDeputy !== 'function') {
+      throw new Error(`removeGroupDeputy not supported by bot: ${botExternalId}`);
+    }
+    return api.removeGroupDeputy(memberId, groupId);
+  }
+
+  async getPendingGroupMembers(
+    botExternalId: string,
+    groupId: string,
+  ): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api || typeof api.getPendingGroupMembers !== 'function') {
+      throw new Error(`getPendingGroupMembers not supported by bot: ${botExternalId}`);
+    }
+    return api.getPendingGroupMembers(groupId);
+  }
+
+  async reviewPendingMemberRequest(
+    botExternalId: string,
+    groupId: string,
+    payload: { members: string | string[]; isApprove: boolean },
+  ): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api || typeof api.reviewPendingMemberRequest !== 'function') {
+      throw new Error(`reviewPendingMemberRequest not supported by bot: ${botExternalId}`);
+    }
+    return api.reviewPendingMemberRequest(payload, groupId);
+  }
+
+  async updateGroupSettings(
+    botExternalId: string,
+    groupId: string,
+    options: any,
+  ): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api || typeof api.updateGroupSettings !== 'function') {
+      throw new Error(`updateGroupSettings not supported by bot: ${botExternalId}`);
+    }
+    return api.updateGroupSettings(options, groupId);
+  }
+
+  async changeGroupName(
+    botExternalId: string,
+    groupId: string,
+    name: string,
+  ): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api || typeof api.changeGroupName !== 'function') {
+      throw new Error(`changeGroupName not supported by bot: ${botExternalId}`);
+    }
+    return api.changeGroupName(name, groupId);
+  }
+
+  async changeGroupAvatar(
+    botExternalId: string,
+    groupId: string,
+    avatarUrl: string,
+  ): Promise<any> {
+    const api = this.instances.get(botExternalId) as any;
+    if (!api || typeof api.changeGroupAvatar !== 'function') {
+      throw new Error(`changeGroupAvatar not supported by bot: ${botExternalId}`);
+    }
+
+    const parseAttachment = (url: string) => {
+      if (url.startsWith('data:')) {
+        const match = url.match(/^data:([^;]+);name=([^;]+);base64,(.+)$/);
+        if (match) {
+          const [, mimeType, encodedName, base64Data] = match;
+          const fileName = decodeURIComponent(encodedName);
+          const buffer = Buffer.from(base64Data, 'base64');
+          return {
+            data: buffer,
+            filename: fileName as `${string}.${string}`,
+            metadata: {
+              totalSize: buffer.length,
+            },
+          };
+        }
+      }
+      return url;
+    };
+
+    const parsed = parseAttachment(avatarUrl);
+    return api.changeGroupAvatar(parsed, groupId);
+  }
 }
+

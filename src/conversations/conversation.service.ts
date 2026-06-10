@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { Bot, Conversation, Prisma } from '@prisma/client';
 import { ChannelType, ThreadType } from '@/shared/types';
 import { PrismaService } from '@/shared/prisma/prisma.service';
@@ -125,6 +125,27 @@ export class ConversationService {
       memberCount = groupInfo.totalMember;
     }
 
+    let lastMsgText = msg.text ?? '';
+    if (!lastMsgText.trim()) {
+      if (msg.type === 'image') {
+        lastMsgText = '[Hình ảnh]';
+      } else if (msg.type === 'video') {
+        lastMsgText = '[Video]';
+      } else if (msg.type === 'file') {
+        lastMsgText = '[Tệp tin]';
+      } else if (msg.type === 'voice') {
+        lastMsgText = '[Tin nhắn thoại]';
+      } else if (msg.type === 'sticker') {
+        lastMsgText = '[Nhãn dán]';
+      } else if (msg.type === 'link') {
+        lastMsgText = '[Liên kết]';
+      } else if (msg.type === 'pin') {
+        lastMsgText = '[Tin ghim]';
+      } else if (msg.type !== 'chat' && msg.type !== 'webchat') {
+        lastMsgText = '[Tin nhắn]';
+      }
+    }
+
     const conversation = await this.repo.upsertConversationFromInbound({
       botId: bot.id,
       threadExternalId: msg.threadId,
@@ -132,7 +153,7 @@ export class ConversationService {
       title: convoTitle,
       avatar: convoAvatar,
       timestamp: new Date(msg.timestamp),
-      text: msg.text ?? null,
+      text: lastMsgText || null,
       senderExternalId: msg.senderExternalId,
       senderName: lastMessageSenderName,
       senderAvatar: lastMessageSenderAvatar,
@@ -240,13 +261,140 @@ export class ConversationService {
     limit?: number;
     cursor?: number;
   }) {
-    const take = input.limit ?? 30;
+    const convo = await this.prisma.conversation.findUnique({
+      where: { id: input.conversationId },
+      include: { bot: true },
+    });
+
+    if (convo && convo.bot.channel === 'zalo' && convo.threadType === 'group') {
+      const metadata = (convo.metadata as Record<string, any>) || {};
+      const lastSyncedAt = metadata.lastSyncedAt || 0;
+      const now = Date.now();
+
+      // Chỉ đồng bộ lại từ Zalo nếu lần đồng bộ trước đó đã quá 2 phút (120s)
+      if (now - lastSyncedAt > 120000) {
+        try {
+          const groupInfo = await this.zaloZcaService.getGroupInfo(
+            convo.bot.externalId,
+            convo.threadExternalId,
+          );
+
+          if (groupInfo) {
+            const newMetadata = {
+              ...metadata,
+              memberCount: groupInfo.totalMember,
+              creatorId: groupInfo.creatorId,
+              adminIds: groupInfo.adminIds || [],
+              settings: groupInfo.setting || {},
+              lastSyncedAt: now,
+            };
+
+            await this.prisma.conversation.update({
+              where: { id: convo.id },
+              data: {
+                title: groupInfo.name || convo.title,
+                avatar: groupInfo.avt || convo.avatar,
+                metadata: newMetadata,
+              },
+            });
+
+            let currentMems = groupInfo.currentMems || [];
+            if (currentMems.length === 0 && groupInfo.memVerList && groupInfo.memVerList.length > 0) {
+              try {
+                const memberIds = groupInfo.memVerList.map((m: string) => m.split('_')[0]);
+                const memsRes = await this.zaloZcaService.getGroupMembersInfo(convo.bot.externalId, memberIds);
+                if (memsRes?.profiles) {
+                  currentMems = Object.values(memsRes.profiles).map((p: any) => ({
+                    id: p.id,
+                    dName: p.displayName || p.zaloName || 'Zalo Member',
+                    avatar: p.avatar,
+                  }));
+                }
+              } catch (err) {
+                console.warn('Failed to fetch group members info via getGroupMembersInfo:', err);
+              }
+            }
+            
+            const dbParticipants = await this.prisma.participant.findMany({
+              where: { conversationId: convo.id },
+            });
+
+            const upsertPromises = currentMems.map((mem: any) => {
+              const externalId = mem.id;
+              const displayName = mem.dName || mem.zaloName || 'Zalo Member';
+              const avatar = mem.avatar || null;
+              const isBot = externalId === convo.bot.externalId;
+
+              return this.prisma.participant.upsert({
+                where: {
+                  conversationId_externalId: {
+                    conversationId: convo.id,
+                    externalId,
+                  },
+                },
+                create: {
+                  conversationId: convo.id,
+                  externalId,
+                  displayName,
+                  avatar,
+                  isBot,
+                },
+                update: {
+                  displayName,
+                  avatar,
+                },
+              });
+            });
+            await Promise.all(upsertPromises);
+
+            const currentUids = new Set(currentMems.map((m: any) => m.id));
+            const uidsToRemove = dbParticipants
+              .map((p) => p.externalId)
+              .filter((uid) => !currentUids.has(uid));
+
+            if (uidsToRemove.length > 0) {
+              await this.prisma.participant.deleteMany({
+                where: {
+                  conversationId: convo.id,
+                  externalId: { in: uidsToRemove },
+                },
+              });
+            }
+          }
+        } catch (err) {
+          console.error(`Failed to sync group participants for convo ${convo.id}:`, err);
+        }
+      }
+    }
+
+    const take = input.limit ?? 1000;
     const rows = await this.repo.findManyParticipants(input.conversationId, take + 1, input.cursor);
     
+    const refreshedConvo = await this.prisma.conversation.findUnique({
+      where: { id: input.conversationId },
+      select: { metadata: true },
+    });
+    const metadata = (refreshedConvo?.metadata as Record<string, any>) || {};
+    const creatorId = metadata.creatorId || '';
+    const adminIds = metadata.adminIds || [];
+
     const hasMore = rows.length > take;
     const items = hasMore ? rows.slice(0, take) : rows;
+
+    const mappedItems = items.map((p) => {
+      const isOwner = p.externalId === creatorId;
+      const isAdmin = adminIds.includes(p.externalId) || isOwner;
+      const role = isOwner ? 'owner' : (adminIds.includes(p.externalId) ? 'deputy' : 'member');
+      return {
+        ...p,
+        isOwner,
+        isAdmin,
+        role,
+      };
+    });
+
     return {
-      items,
+      items: mappedItems,
       nextCursor: hasMore ? items[items.length - 1]!.id : null,
     };
   }
@@ -283,5 +431,249 @@ export class ConversationService {
 
   async updateAutoReply(id: number, autoReplyEnabled: boolean): Promise<void> {
     await this.repo.updateAutoReply(id, autoReplyEnabled);
+  }
+
+  private async getGroupConversationOrThrow(id: number) {
+    const convo = await this.prisma.conversation.findUnique({
+      where: { id },
+      include: { bot: true },
+    });
+    if (!convo) {
+      throw new NotFoundException(`Conversation ${id} not found`);
+    }
+    if (convo.bot.channel !== 'zalo' || convo.threadType !== 'group') {
+      throw new BadRequestException('Operation only supported for Zalo group chats');
+    }
+    return convo;
+  }
+
+  async createGroup(botExternalId: string, name: string, members: string[], avatar?: string): Promise<Conversation> {
+    const bot = await this.getBotByExternal(ChannelType.zalo, botExternalId);
+
+    let avatarSource: any = undefined;
+    if (avatar) {
+      const parseAttachment = (url: string) => {
+        if (url.startsWith('data:')) {
+          const match = url.match(/^data:([^;]+);name=([^;]+);base64,(.+)$/);
+          if (match) {
+            const [, mimeType, encodedName, base64Data] = match;
+            const fileName = decodeURIComponent(encodedName);
+            const buffer = Buffer.from(base64Data, 'base64');
+            return {
+              data: buffer,
+              filename: fileName as `${string}.${string}`,
+              metadata: {
+                totalSize: buffer.length,
+              },
+            };
+          }
+        }
+        return url;
+      };
+      avatarSource = parseAttachment(avatar);
+    }
+
+    const res = await this.zaloZcaService.createGroup(botExternalId, {
+      name,
+      members,
+      ...(avatarSource ? { avatarSource } : {}),
+    });
+
+    if (!res?.groupId) {
+      throw new Error('Failed to create group on Zalo: No groupId returned');
+    }
+    const groupId = res.groupId;
+
+    let finalAvatar: string | null = null;
+    try {
+      if (avatarSource) {
+        const groupInfo = await this.zaloZcaService.getGroupInfo(botExternalId, groupId);
+        if (groupInfo?.avt) {
+          finalAvatar = groupInfo.avt;
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to fetch new group info immediately for avatar:', err);
+    }
+
+    return this.prisma.conversation.upsert({
+      where: {
+        botId_threadExternalId: {
+          botId: bot.id,
+          threadExternalId: groupId,
+        },
+      },
+      update: {
+        title: name || 'Zalo Group',
+        avatar: finalAvatar || undefined,
+      },
+      create: {
+        botId: bot.id,
+        threadType: ThreadType.group,
+        threadExternalId: groupId,
+        title: name || 'Zalo Group',
+        avatar: finalAvatar,
+        unread: 0,
+        lastMessageAt: new Date(),
+        metadata: {
+          memberCount: members.length + 1,
+        },
+      },
+    });
+  }
+
+  async leaveGroup(id: number): Promise<void> {
+    const convo = await this.getGroupConversationOrThrow(id);
+    await this.zaloZcaService.leaveGroup(convo.bot.externalId, convo.threadExternalId);
+    
+    const metadata = (convo.metadata as Record<string, any>) || {};
+    await this.prisma.conversation.update({
+      where: { id },
+      data: {
+        metadata: {
+          ...metadata,
+          isBotParticipant: false,
+          memberCount: 0,
+        },
+      },
+    });
+  }
+
+  async disperseGroup(id: number): Promise<void> {
+    const convo = await this.getGroupConversationOrThrow(id);
+    await this.zaloZcaService.disperseGroup(convo.bot.externalId, convo.threadExternalId);
+    await this.prisma.conversation.delete({
+      where: { id },
+    });
+  }
+
+  async inviteMember(id: number, userId: string): Promise<void> {
+    const convo = await this.getGroupConversationOrThrow(id);
+    await this.zaloZcaService.inviteUserToGroups(convo.bot.externalId, convo.threadExternalId, userId);
+  }
+
+  async removeMember(id: number, userId: string): Promise<void> {
+    const convo = await this.getGroupConversationOrThrow(id);
+    await this.zaloZcaService.removeUserFromGroup(convo.bot.externalId, convo.threadExternalId, userId);
+    
+    await this.prisma.participant.deleteMany({
+      where: {
+        conversationId: id,
+        externalId: userId,
+      },
+    });
+  }
+
+  async promoteDeputy(id: number, userId: string): Promise<void> {
+    const convo = await this.getGroupConversationOrThrow(id);
+    await this.zaloZcaService.addGroupDeputy(convo.bot.externalId, convo.threadExternalId, userId);
+    
+    const metadata = (convo.metadata as Record<string, any>) || {};
+    const adminIds = metadata.adminIds || [];
+    if (!adminIds.includes(userId)) {
+      adminIds.push(userId);
+    }
+    await this.prisma.conversation.update({
+      where: { id },
+      data: {
+        metadata: {
+          ...metadata,
+          adminIds,
+        },
+      },
+    });
+  }
+
+  async demoteDeputy(id: number, userId: string): Promise<void> {
+    const convo = await this.getGroupConversationOrThrow(id);
+    await this.zaloZcaService.removeGroupDeputy(convo.bot.externalId, convo.threadExternalId, userId);
+    
+    const metadata = (convo.metadata as Record<string, any>) || {};
+    let adminIds = metadata.adminIds || [];
+    adminIds = adminIds.filter((aid: string) => aid !== userId);
+    await this.prisma.conversation.update({
+      where: { id },
+      data: {
+        metadata: {
+          ...metadata,
+          adminIds,
+        },
+      },
+    });
+  }
+
+  async changeOwner(id: number, userId: string): Promise<void> {
+    const convo = await this.getGroupConversationOrThrow(id);
+    await this.zaloZcaService.changeGroupOwner(convo.bot.externalId, convo.threadExternalId, userId);
+    
+    const metadata = (convo.metadata as Record<string, any>) || {};
+    await this.prisma.conversation.update({
+      where: { id },
+      data: {
+        metadata: {
+          ...metadata,
+          creatorId: userId,
+        },
+      },
+    });
+  }
+
+  async updateGroupSettings(id: number, settings: any): Promise<void> {
+    const convo = await this.getGroupConversationOrThrow(id);
+    await this.zaloZcaService.updateGroupSettings(convo.bot.externalId, convo.threadExternalId, settings);
+    
+    const metadata = (convo.metadata as Record<string, any>) || {};
+    const currentSettings = metadata.settings || {};
+    await this.prisma.conversation.update({
+      where: { id },
+      data: {
+        metadata: {
+          ...metadata,
+          settings: {
+            ...currentSettings,
+            ...settings,
+          },
+        },
+      },
+    });
+  }
+
+  async getPendingMembers(id: number): Promise<any> {
+    const convo = await this.getGroupConversationOrThrow(id);
+    return this.zaloZcaService.getPendingGroupMembers(convo.bot.externalId, convo.threadExternalId);
+  }
+
+  async reviewPendingMember(id: number, userId: string, approve: boolean): Promise<void> {
+    const convo = await this.getGroupConversationOrThrow(id);
+    await this.zaloZcaService.reviewPendingMemberRequest(convo.bot.externalId, convo.threadExternalId, {
+      members: userId,
+      isApprove: approve,
+    });
+  }
+
+  async changeGroupName(id: number, title: string): Promise<void> {
+    const convo = await this.getGroupConversationOrThrow(id);
+    await this.zaloZcaService.changeGroupName(convo.bot.externalId, convo.threadExternalId, title);
+    await this.prisma.conversation.update({
+      where: { id },
+      data: { title },
+    });
+  }
+
+  async changeGroupAvatar(id: number, avatar: string): Promise<void> {
+    const convo = await this.getGroupConversationOrThrow(id);
+    await this.zaloZcaService.changeGroupAvatar(convo.bot.externalId, convo.threadExternalId, avatar);
+    
+    try {
+      const groupInfo = await this.zaloZcaService.getGroupInfo(convo.bot.externalId, convo.threadExternalId);
+      if (groupInfo?.avt) {
+        await this.prisma.conversation.update({
+          where: { id },
+          data: { avatar: groupInfo.avt },
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to fetch updated avatar immediately:', err);
+    }
   }
 }
