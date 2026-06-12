@@ -16,6 +16,8 @@ export class MessageRepository {
     attachments: Prisma.InputJsonValue;
     quoteOfExternalId: string | null;
     raw?: Prisma.InputJsonValue;
+    tokens?: number;
+    isAutoReply?: boolean;
   }): Promise<Message> {
     return this.prisma.message.upsert({
       where: {
@@ -34,8 +36,13 @@ export class MessageRepository {
         attachments: input.attachments,
         quoteOfExternalId: input.quoteOfExternalId,
         raw: input.raw ?? undefined,
+        tokens: input.tokens ?? 0,
+        isAutoReply: input.isAutoReply ?? false,
       },
-      update: {},
+      update: {
+        tokens: input.tokens ?? undefined,
+        isAutoReply: input.isAutoReply ?? undefined,
+      },
     });
   }
 

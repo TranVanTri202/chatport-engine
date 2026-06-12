@@ -1,26 +1,12 @@
 import { Body, Controller, Get, NotFoundException, Param, Patch, Post, Query } from '@nestjs/common';
 import { promises as fs } from 'node:fs';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { IsOptional, IsString } from 'class-validator';
 import { CurrentCustomer } from '@/shared/decorators/current-customer.decorator';
 import { ZaloQrStorageService } from './zalo-qr-storage.service';
 import { ZaloAdapter } from './zalo.adapter';
 import { ZaloZcaService } from './zalo-zca.service';
 import { PrismaService } from '@/shared/prisma/prisma.service';
-
-export class UpdateZaloProfileDto {
-  @IsString()
-  @IsOptional()
-  name?: string;
-
-  @IsString()
-  @IsOptional()
-  bio?: string;
-
-  @IsString()
-  @IsOptional()
-  avatar?: string;
-}
+import { UpdateZaloProfileDto } from './dto/update-zalo-profile.dto';
 
 /**
  * Convenience wrapper for /channels/zalo/login (also reachable through the

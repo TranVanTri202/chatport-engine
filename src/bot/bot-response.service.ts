@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter';
 import { Bot } from '@prisma/client';
+import { createHash } from 'node:crypto';
 import { ChannelType, MessageType, ThreadType } from '@/shared/types';
 import { AppConfig } from '@/shared/config/app.config';
 import { RedisService } from '@/shared/redis/redis.service';
@@ -17,6 +18,11 @@ import { RetrievalService, RetrievedChunk } from '@/rag/retrieval.service';
 import { LlmService } from '@/llm/llm.service';
 import { LlmCallOverrides } from '@/llm/llm-settings';
 import { QuotaService } from '@/quota/quota.service';
+
+export function hashText(text: string): string {
+  const normalized = (text || '').trim().toLowerCase();
+  return createHash('sha256').update(normalized).digest('hex');
+}
 
 /** Max auto-replies per conversation per window. Prevents spam loops. */
 const REPLY_RATE_WINDOW_SEC = 60;
@@ -163,11 +169,6 @@ export class BotResponseService {
     }
   }
 
-  /**
-   * Public helper to run the standardized RAG context lookup, rolling summary
-   * updates, system prompt template interpolation, and LLM chat call.
-   * Shared between the production auto-reply listener and the demo chat endpoint.
-   */
   async generateReply(
     bot: Bot,
     conversation: { id: number; name?: string | null },
@@ -175,9 +176,6 @@ export class BotResponseService {
   ): Promise<{ reply: string; contexts: any[] } | null> {
     const systemPrompt = bot.systemPrompt?.trim();
     if (!systemPrompt) return null;
-
-    // Quota check — can throw QuotaExceededError
-    await this.quota.consumeRequest(bot.id);
 
     try {
       // RAG retrieval with timeout — fall back to no context if slow
@@ -208,7 +206,6 @@ export class BotResponseService {
 
       const history = await this.messages.lastN(conversation.id, historyLimit);
       if (history.length === 0) {
-        await this.quota.refundRequest(bot.id);
         return null;
       }
 
@@ -257,22 +254,26 @@ export class BotResponseService {
         content: m.text ?? '',
       }));
 
-      const reply = await this.llm.chat({
+      const replyResult = await this.llm.chat({
         system,
         messages,
         overrides: this.botOverrides(bot),
       });
 
-      if (!reply) {
-        await this.quota.refundRequest(bot.id);
+      if (!replyResult || !replyResult.text) {
         return null;
       }
 
+      const reply = replyResult.text;
+      const tokens = replyResult.tokens;
+
+      // Cache the token count in Redis for when the webhook persists the message
+      const hash = hashText(reply);
+      const redisKey = `pending_tokens:${conversation.id}:${hash}`;
+      await this.redis.cacheSet(redisKey, tokens, 300); // 5 minutes TTL
+
       return { reply, contexts };
     } catch (err) {
-      await this.quota.refundRequest(bot.id).catch((refundErr) => {
-        this.logger.error(`Failed to refund quota for bot ${bot.id}: ${refundErr.message}`);
-      });
       throw err;
     }
   }
@@ -309,7 +310,7 @@ export class BotResponseService {
     recentMessages: Array<{ direction: string; text: string | null }>;
     maxChars: number;
   }): Promise<string | null> {
-    const summary = await this.llm.chat({
+    const summaryResult = await this.llm.chat({
       system: [
         'You summarize chat conversations for an assistant.',
         'Keep the summary concise, factual, and useful for future replies.',
@@ -341,6 +342,7 @@ export class BotResponseService {
       overrides: { temperature: 0.2 },
     });
 
+    const summary = summaryResult.text;
     const normalized = this.normalizeSummary(summary, input.maxChars);
     if (normalized === input.currentSummary?.trim()) return input.currentSummary;
     await this.conversations.updateContextSnapshot(input.conversationId, normalized);

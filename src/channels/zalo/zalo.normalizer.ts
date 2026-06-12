@@ -58,7 +58,16 @@ export class ZaloNormalizer {
       quote: quote
         ? { messageExternalId: String(quote.msgId), text: quote.text }
         : undefined,
-      mentions: mentions?.map(String),
+      mentions: mentions
+        ?.map((m: any) => {
+          if (!m) return '';
+          if (typeof m === 'object') {
+            const val = m.uid ?? m.id ?? m.userId;
+            return val !== undefined && val !== null ? String(val) : '';
+          }
+          return String(m);
+        })
+        .filter(Boolean),
       isSelf: senderExternalId === botExternalId,
       raw,
     };

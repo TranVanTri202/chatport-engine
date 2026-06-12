@@ -2,8 +2,6 @@ import { BadRequestException, Body, Controller, Post, UploadedFile, UseIntercept
 import { CommandBus } from '@nestjs/cqrs';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { IsEnum, IsNumber, IsObject, IsOptional, IsString, ValidateNested } from 'class-validator';
-import { Type } from 'class-transformer';
 import { SendMessageCommand } from './commands/send-message.command';
 import { SendTextMessageDto } from './dto/send-text-message.dto';
 import { SendImageFileDto } from './dto/send-image-file.dto';
@@ -23,77 +21,10 @@ import { ZaloZcaService } from '@/channels/zalo/zalo-zca.service';
 import { PrismaService } from '@/shared/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DOMAIN_EVENTS } from '@/shared/events/domain-events';
-
-
-export class PinMessageDto {
-  @IsString()
-  botExternalId!: string;
-
-  @IsString()
-  threadId!: string;
-
-  @IsString()
-  threadType!: string;
-
-  @IsString()
-  messageExternalId!: string;
-}
-
-export class ForwardMessageDto {
-  @IsString()
-  botExternalId!: string;
-
-  @IsString()
-  messageExternalId!: string;
-
-  @IsString()
-  targetThreadId!: string;
-
-  @IsString()
-  targetThreadType!: 'user' | 'group';
-}
-
-export class UnpinMessageDto {
-  @IsString()
-  botExternalId!: string;
-
-  @IsString()
-  threadId!: string;
-
-  @IsString()
-  topicId!: string;
-}
-
-class StickerDataDto {
-  @IsNumber()
-  sticker_id!: number;
-
-  @IsNumber()
-  cat_id!: number;
-
-  @IsNumber()
-  sticker_type!: number;
-
-  @IsString()
-  url!: string;
-}
-
-export class SendStickerMessageDto {
-  @IsString()
-  botExternalId!: string;
-
-  @IsString()
-  threadId!: string;
-
-  @IsEnum(ThreadType)
-  threadType!: ThreadType;
-
-  @IsObject()
-  @ValidateNested()
-  @Type(() => StickerDataDto)
-  sticker!: StickerDataDto;
-}
-
+import { PinMessageDto } from './dto/pin-message.dto';
+import { ForwardMessageDto } from './dto/forward-message.dto';
+import { UnpinMessageDto } from './dto/unpin-message.dto';
+import { SendStickerMessageDto, StickerDataDto } from './dto/send-sticker-message.dto';
 
 @ApiTags('messages')
 @ApiBearerAuth('jwt')

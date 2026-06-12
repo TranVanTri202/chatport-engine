@@ -173,7 +173,10 @@ export class ConversationRepository {
 
   async findManyByBot(botId: number, limit: number, cursor?: number): Promise<Conversation[]> {
     return this.prisma.conversation.findMany({
-      where: { botId },
+      where: {
+        botId,
+        lastMessageAt: { not: null },
+      },
       orderBy: [{ lastMessageAt: 'desc' }, { id: 'desc' }],
       take: limit,
       ...(cursor !== undefined && {

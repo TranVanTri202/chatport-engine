@@ -29,6 +29,10 @@ export class BotService {
   list(customerId: number): Promise<any[]> {
     return this.repo.findManyByCustomer(customerId);
   }
+  
+  getAnalytics(customerId: number, botId?: number, startDate?: Date, endDate?: Date) {
+    return this.repo.getAnalytics(customerId, botId, startDate, endDate);
+  }
 
   async get(id: number): Promise<Bot> {
     const bot = await this.repo.findById(id);

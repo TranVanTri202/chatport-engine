@@ -16,7 +16,7 @@ import {
 import { ChannelRegistry } from '../channel-registry.service';
 import { ZaloInstanceRegistry } from './zalo-instance.registry';
 import { ZaloSessionService, ZaloSessionPayload } from './zalo-session.service';
-import { ZaloListeners } from './zalo.listeners';
+import { ZaloListeners } from './listeners/zalo-listeners.orchestrator';
 import { ZaloZcaService } from './zalo-zca.service';
 import { BotRepository } from '@/bot/repositories/bot.repository';
 import { ContactsRepository } from '@/contacts/repositories/contacts.repository';

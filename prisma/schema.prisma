@@ -162,6 +162,8 @@ model Message {
   reactions         Json             @default("[]")
   quoteOfExternalId String?
   raw               Json?
+  tokens            Int              @default(0)
+  isAutoReply       Boolean          @default(false)
   createdAt         DateTime         @default(now())
   conversation      Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 

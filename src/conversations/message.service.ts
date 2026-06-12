@@ -10,6 +10,8 @@ import { MessageRepository } from './repositories/message.repository';
 import { ConversationRepository } from './repositories/conversation.repository';
 import { ZaloZcaService } from '@/channels/zalo/zalo-zca.service';
 import { ZaloNormalizer } from '@/channels/zalo/zalo.normalizer';
+import { RedisService } from '@/shared/redis/redis.service';
+import { hashText } from '@/bot/bot-response.service';
 
 const DEFAULT_HISTORY_LIMIT = 20;
 
@@ -20,6 +22,7 @@ export class MessageService {
     private readonly convoRepo: ConversationRepository,
     private readonly zaloZcaService: ZaloZcaService,
     private readonly zaloNormalizer: ZaloNormalizer,
+    private readonly redis: RedisService,
   ) {}
 
   /**
@@ -32,6 +35,21 @@ export class MessageService {
     msg: InboundMessageDto;
   }): Promise<Message> {
     const { conversationId, direction, msg } = input;
+
+    let tokens = 0;
+    let isAutoReply = false;
+
+    if (direction === 'out' && msg.text) {
+      const hash = hashText(msg.text);
+      const redisKey = `pending_tokens:${conversationId}:${hash}`;
+      const cachedTokens = await this.redis.cacheGet<number>(redisKey);
+      if (cachedTokens !== null) {
+        tokens = cachedTokens;
+        isAutoReply = true;
+        await this.redis.raw.del(redisKey).catch(() => {});
+      }
+    }
+
     return this.repo.upsertInbound({
       conversationId,
       direction,
@@ -42,6 +60,8 @@ export class MessageService {
       attachments: msg.attachments as unknown as Prisma.InputJsonValue,
       quoteOfExternalId: msg.quote?.messageExternalId ?? null,
       raw: msg.raw as any,
+      tokens,
+      isAutoReply,
     });
   }
 

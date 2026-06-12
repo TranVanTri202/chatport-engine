@@ -10,7 +10,7 @@ import { ZaloController } from './zalo.controller';
 import { ZaloInstanceRegistry } from './zalo-instance.registry';
 import { ZaloSessionService } from './zalo-session.service';
 import { ZaloNormalizer } from './zalo.normalizer';
-import { ZaloListeners } from './zalo.listeners';
+import { ZaloListeners } from './listeners/zalo-listeners.orchestrator';
 import { ZaloFriendListener } from './listeners/zalo-friend.listener';
 import { ZaloUserchatListener } from './listeners/zalo-userchat.listener';
 import { ZaloReactionListener } from './listeners/zalo-reaction.listener';

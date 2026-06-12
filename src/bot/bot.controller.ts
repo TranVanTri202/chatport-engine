@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentCustomer } from '@/shared/decorators/current-customer.decorator';
@@ -22,6 +23,19 @@ export class BotController {
   @Get()
   list(@CurrentCustomer() customerId: number) {
     return this.bots.list(customerId);
+  }
+
+  @Get('analytics')
+  analytics(
+    @CurrentCustomer() customerId: number,
+    @Query('botId') botId?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    const bId = botId ? parseInt(botId, 10) : undefined;
+    const start = startDate ? new Date(startDate) : undefined;
+    const end = endDate ? new Date(endDate) : undefined;
+    return this.bots.getAnalytics(customerId, bId, start, end);
   }
 
   @Get(':channel/:externalId')

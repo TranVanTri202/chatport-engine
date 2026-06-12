@@ -423,7 +423,10 @@ export class ZaloZcaService {
       try {
         const res = await api.lastOnline(uid);
         const showOnlineSetting = Boolean(res?.settings?.show_online_status);
-        const lastOnline = typeof res?.lastOnline === 'number' ? res.lastOnline : null;
+        let lastOnline = typeof res?.lastOnline === 'number' ? res.lastOnline : null;
+        if (lastOnline && lastOnline < 10_000_000_000) {
+          lastOnline = lastOnline * 1000;
+        }
         const online = showOnlineSetting && lastOnline ? (Date.now() - lastOnline < 180_000) : false;
         const data: ZaloLastOnlineResponse = {
           online,

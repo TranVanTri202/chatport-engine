@@ -77,7 +77,7 @@ export class LlmService {
     };
   }
 
-  async chat(input: ChatInput): Promise<string> {
+  async chat(input: ChatInput): Promise<{ text: string; tokens: number }> {
     const settings = this.resolve(input.overrides);
 
     // Reuse cached ChatOpenAI by full settings key (avoids creating
@@ -102,7 +102,14 @@ export class LlmService {
                 .map((part) => (typeof part === 'string' ? part : (part as { text?: string }).text ?? ''))
                 .join('')
             : String(content ?? '');
-      return text.trim();
+      
+      const usage = (res as any).usage_metadata || (res as any).response_metadata?.tokenUsage;
+      const tokens = usage?.total_tokens ?? usage?.totalTokens ?? 0;
+
+      return {
+        text: text.trim(),
+        tokens,
+      };
     } catch (err) {
       this.logger.error(`LangChain chat failed: ${(err as Error).message}`);
       throw err;
