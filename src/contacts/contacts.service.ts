@@ -1,16 +1,18 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { PrismaService } from '@/shared/prisma/prisma.service';
 import { BotService } from '@/bot/bot.service';
 import { ChannelType } from '@/shared/types';
 import { Contact, FriendRequest } from '@prisma/client';
 import { ZaloZcaService } from '@/channels/zalo/zalo-zca.service';
 import { DOMAIN_EVENTS } from '@/shared/events/domain-events';
+import { ContactsRepository } from './repositories/contacts.repository';
+import { ConversationRepository } from '@/conversations/repositories/conversation.repository';
 
 @Injectable()
 export class ContactsService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: ContactsRepository,
+    private readonly convoRepo: ConversationRepository,
     private readonly bots: BotService,
     private readonly zca: ZaloZcaService,
     private readonly eventEmitter: EventEmitter2,
@@ -21,32 +23,20 @@ export class ContactsService {
     if (channel === ChannelType.zalo) {
       try {
         const onlineIds = await this.zca.getFriendOnlines(bot.externalId);
-        await this.prisma.$transaction([
-          this.prisma.contact.updateMany({
-            where: { botId: bot.id, isOnline: true },
-            data: { isOnline: false },
-          }),
-          this.prisma.contact.updateMany({
-            where: { botId: bot.id, externalId: { in: onlineIds } },
-            data: { isOnline: true },
-          }),
-        ]);
+        await this.repo.setAllOfflineByBot(bot.id);
+        if (onlineIds.length > 0) {
+          await this.repo.setOnlineByExternalIds(bot.id, onlineIds);
+        }
       } catch (err) {
         console.error('Failed to sync friend online status:', err);
       }
     }
-    return this.prisma.contact.findMany({
-      where: { botId: bot.id },
-      orderBy: { name: 'asc' },
-    });
+    return this.repo.findManyByBot(bot.id);
   }
 
   async getFriendRequests(channel: ChannelType, externalId: string): Promise<FriendRequest[]> {
     const bot = await this.bots.getByExternal(channel, externalId);
-    return this.prisma.friendRequest.findMany({
-      where: { botId: bot.id },
-      orderBy: { createdAt: 'desc' },
-    });
+    return this.repo.findManyRequestsByBot(bot.id);
   }
 
   async getSentFriendRequests(channel: ChannelType, externalId: string): Promise<any[]> {
@@ -67,9 +57,7 @@ export class ContactsService {
 
   async acceptFriendRequest(channel: ChannelType, externalId: string, requestId: number): Promise<Contact> {
     const bot = await this.bots.getByExternal(channel, externalId);
-    const request = await this.prisma.friendRequest.findFirst({
-      where: { id: requestId, botId: bot.id },
-    });
+    const request = await this.repo.findRequestByIdAndBot(requestId, bot.id);
     if (!request) {
       throw new NotFoundException(`Friend request ${requestId} not found`);
     }
@@ -78,7 +66,8 @@ export class ContactsService {
       await this.zca.acceptFriendRequest(bot.externalId, request.externalId);
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    return this.repo.transaction(async (tx) => {
+      // Access prisma through the tx client for atomicity
       const contact = await tx.contact.create({
         data: {
           botId: bot.id,
@@ -99,9 +88,7 @@ export class ContactsService {
 
   async declineFriendRequest(channel: ChannelType, externalId: string, requestId: number): Promise<{ ok: boolean }> {
     const bot = await this.bots.getByExternal(channel, externalId);
-    const request = await this.prisma.friendRequest.findFirst({
-      where: { id: requestId, botId: bot.id },
-    });
+    const request = await this.repo.findRequestByIdAndBot(requestId, bot.id);
     if (!request) {
       throw new NotFoundException(`Friend request ${requestId} not found`);
     }
@@ -110,14 +97,17 @@ export class ContactsService {
       await this.zca.rejectFriendRequest(bot.externalId, request.externalId);
     }
 
-    await this.prisma.friendRequest.delete({
-      where: { id: requestId },
-    });
-
+    await this.repo.deleteRequest(requestId);
     return { ok: true };
   }
 
-  async findUser(channel: ChannelType, externalId: string, phone: string) {
+  async findUser(channel: ChannelType, externalId: string, phone: string): Promise<{
+    uid: string;
+    zaloName: string;
+    displayName: string;
+    avatar: string | null;
+    isFriend: boolean;
+  } | null> {
     if (channel !== ChannelType.zalo) {
       throw new Error('Search by phone is only supported for Zalo');
     }
@@ -126,13 +116,7 @@ export class ContactsService {
     if (!result) return null;
 
     // Check if they are already a friend
-    const isFriend = await this.prisma.contact.findFirst({
-      where: {
-        botId: bot.id,
-        externalId: result.uid,
-        isFriend: true,
-      },
-    });
+    const isFriend = await this.repo.findFirstFriendByBotAndExternal(bot.id, result.uid);
 
     return {
       uid: result.uid,
@@ -176,25 +160,14 @@ export class ContactsService {
     targetUserId: string,
   ) {
     const bot = await this.bots.getByExternal(channel, externalId);
-    const orConditions: any[] = [{ externalId: targetUserId }];
-    if (/^\d+$/.test(targetUserId)) {
-      orConditions.push({ id: parseInt(targetUserId, 10) });
-    }
-    const contact = await this.prisma.contact.findFirst({
-      where: {
-        botId: bot.id,
-        OR: orConditions,
-      },
-    });
+    const contact = await this.repo.findFirstByBotAndExternalOrId(bot.id, targetUserId);
     if (!contact) {
       throw new NotFoundException('Contact not found');
     }
     if (channel === ChannelType.zalo) {
       await this.zca.removeFriend(bot.externalId, contact.externalId);
     }
-    await this.prisma.contact.delete({
-      where: { id: contact.id },
-    });
+    await this.repo.delete(contact.id);
     return { ok: true };
   }
 
@@ -209,20 +182,11 @@ export class ContactsService {
       await this.zca.changeFriendAlias(bot.externalId, alias, friendId);
     }
     // Lưu biệt danh vào trường name trong DB
-    await this.prisma.contact.updateMany({
-      where: { botId: bot.id, externalId: friendId },
-      data: { name: alias },
-    });
+    await this.repo.updateManyByBotAndExternal(bot.id, friendId, { name: alias });
     // Cập nhật title của conversation tương ứng
-    const conversation = await this.prisma.conversation.findFirst({
-      where: { botId: bot.id, threadExternalId: friendId },
-      select: { id: true },
-    });
+    const conversation = await this.convoRepo.findByBotAndThread(bot.id, friendId);
     if (conversation) {
-      await this.prisma.conversation.update({
-        where: { id: conversation.id },
-        data: { title: alias },
-      });
+      await this.convoRepo.update(conversation.id, { title: alias });
       // Emit socket event để FE cập nhật tên trong list người dùng
       this.eventEmitter.emit(DOMAIN_EVENTS.ConversationRenamed, {
         customerId: bot.customerId,
@@ -241,29 +205,18 @@ export class ContactsService {
   ) {
     const bot = await this.bots.getByExternal(channel, externalId);
     // Lấy contact để biết zaloName
-    const contact = await this.prisma.contact.findFirst({
-      where: { botId: bot.id, externalId: friendId },
-    });
+    const contact = await this.repo.findFirstByBotAndExternal(bot.id, friendId);
     if (!contact) throw new NotFoundException('Contact not found');
     if (channel === ChannelType.zalo) {
       await this.zca.removeFriendAlias(bot.externalId, friendId);
     }
     // Khôi phục tên về zaloName nếu có
     const restoreName = (contact as any).zaloName || contact.name;
-    await this.prisma.contact.update({
-      where: { id: contact.id },
-      data: { name: restoreName },
-    });
+    await this.repo.update(contact.id, { name: restoreName });
     // Cập nhật title của conversation tương ứng
-    const conversation = await this.prisma.conversation.findFirst({
-      where: { botId: bot.id, threadExternalId: friendId },
-      select: { id: true },
-    });
+    const conversation = await this.convoRepo.findByBotAndThread(bot.id, friendId);
     if (conversation) {
-      await this.prisma.conversation.update({
-        where: { id: conversation.id },
-        data: { title: restoreName },
-      });
+      await this.convoRepo.update(conversation.id, { title: restoreName });
       // Emit socket event để FE cập nhật tên trong list
       this.eventEmitter.emit(DOMAIN_EVENTS.ConversationRenamed, {
         customerId: bot.customerId,
@@ -286,55 +239,26 @@ export class ContactsService {
 
     let threadExternalId = targetUserId;
     if (channel === ChannelType.zalo && /^\d+$/.test(targetUserId) && targetUserId.length < 10) {
-      const contact = await this.prisma.contact.findFirst({
-        where: {
-          botId: bot.id,
-          id: parseInt(targetUserId, 10),
-        },
-      });
+      const contact = await this.repo.findFirstByBotAndExternalOrId(bot.id, targetUserId);
       if (contact) {
         threadExternalId = contact.externalId;
       }
     }
 
-    const conversation = await this.prisma.conversation.upsert({
-      where: {
-        botId_threadExternalId: {
-          botId: bot.id,
-          threadExternalId,
-        },
-      },
-      create: {
-        botId: bot.id,
-        threadType: 'user',
-        threadExternalId,
-        title: displayName,
-        avatar: avatar,
-      },
-      update: {
-        title: displayName,
-        avatar: avatar,
-      },
+    const conversation = await this.convoRepo.upsertByBotAndThread({
+      botId: bot.id,
+      threadExternalId,
+      threadType: 'user',
+      title: displayName,
+      avatar: avatar,
     });
 
-    await this.prisma.participant.upsert({
-      where: {
-        conversationId_externalId: {
-          conversationId: conversation.id,
-          externalId: threadExternalId,
-        },
-      },
-      create: {
-        conversationId: conversation.id,
-        externalId: threadExternalId,
-        displayName: displayName,
-        avatar: avatar,
-        isBot: false,
-      },
-      update: {
-        displayName: displayName,
-        avatar: avatar,
-      },
+    await this.convoRepo.upsertParticipant({
+      conversationId: conversation.id,
+      externalId: threadExternalId,
+      displayName,
+      avatar,
+      isBot: false,
     });
 
     return conversation;

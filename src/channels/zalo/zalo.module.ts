@@ -2,6 +2,9 @@ import { Module, OnApplicationBootstrap, Logger, forwardRef } from '@nestjs/comm
 import { PrismaService } from '@/shared/prisma/prisma.service';
 import { MessagingModule } from '@/messaging/messaging.module';
 import { RealtimeModule } from '@/realtime/realtime.module';
+import { BotModule } from '@/bot/bot.module';
+import { ConversationsModule } from '@/conversations/conversations.module';
+import { ContactsModule } from '@/contacts/contacts.module';
 import { ZaloAdapter } from './zalo.adapter';
 import { ZaloController } from './zalo.controller';
 import { ZaloInstanceRegistry } from './zalo-instance.registry';
@@ -16,9 +19,16 @@ import { ZaloUndoListener } from './listeners/zalo-undo.listener';
 import { ZaloTypingListener } from './listeners/zalo-typing.listener';
 import { ZaloQrStorageService } from './zalo-qr-storage.service';
 import { ZaloZcaService } from './zalo-zca.service';
+import { ZaloRepository } from './repositories/zalo.repository';
 
 @Module({
-  imports: [forwardRef(() => MessagingModule), forwardRef(() => RealtimeModule)],
+  imports: [
+    forwardRef(() => MessagingModule),
+    forwardRef(() => RealtimeModule),
+    forwardRef(() => BotModule),
+    forwardRef(() => ConversationsModule),
+    forwardRef(() => ContactsModule),
+  ],
   controllers: [ZaloController],
   providers: [
     ZaloAdapter,
@@ -34,6 +44,7 @@ import { ZaloZcaService } from './zalo-zca.service';
     ZaloTypingListener,
     ZaloQrStorageService,
     ZaloZcaService,
+    ZaloRepository,
   ],
   exports: [ZaloAdapter, ZaloZcaService, ZaloNormalizer],
 })

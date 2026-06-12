@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { PrismaService } from '@/shared/prisma/prisma.service';
+import { BotRepository } from '@/bot/repositories/bot.repository';
 import { DOMAIN_EVENTS } from '@/shared/events/domain-events';
+import { ZaloRepository } from '../repositories/zalo.repository';
 
 /**
  * Handles Zalo undo (message recall/delete) events.
@@ -11,7 +12,8 @@ export class ZaloUndoListener {
   private readonly logger = new Logger(ZaloUndoListener.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly botRepo: BotRepository,
+    private readonly zaloRepo: ZaloRepository,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -28,38 +30,23 @@ export class ZaloUndoListener {
     }
 
     try {
-      // Resolve bot & customer
-      const bot = await this.prisma.bot.findUnique({
-        where: { id: botId },
-        select: { customerId: true },
-      });
+      const bot = await this.botRepo.findById(botId);
       if (!bot) {
         this.logger.warn(`[handleUndo] Bot not found for botId=${botId}`);
         return;
       }
 
-      // Find message in DB
-      const message = await this.prisma.message.findFirst({
-        where: {
-          conversation: { botId },
-          messageExternalId: String(msgId),
-        },
-      });
+      const message = await this.zaloRepo.findMessageByExternalForBot(botId, String(msgId));
 
       if (message) {
         this.logger.log(
           `[handleUndo] Found message ID=${message.id} (externalId=${msgId}), marking as recalled`,
         );
         const rawObj = (message.raw as Record<string, any>) || {};
-        await this.prisma.message.update({
-          where: { id: message.id },
-          data: {
-            raw: {
-              ...rawObj,
-              isRecalled: true,
-              recalledAt: new Date().toISOString(),
-            },
-          },
+        await this.zaloRepo.updateMessageRaw(message.id, {
+          ...rawObj,
+          isRecalled: true,
+          recalledAt: new Date().toISOString(),
         });
 
         this.eventEmitter.emit(DOMAIN_EVENTS.MessageRecalled, {

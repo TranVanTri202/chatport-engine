@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { PrismaService } from '@/shared/prisma/prisma.service';
+import { BotRepository } from '@/bot/repositories/bot.repository';
 import { DOMAIN_EVENTS } from '@/shared/events/domain-events';
+import { ZaloRepository } from '../repositories/zalo.repository';
 
 const EMOJI_MAP: Record<string, string> = {
   '/-heart': '❤️',
@@ -20,7 +21,8 @@ export class ZaloReactionListener {
   private readonly logger = new Logger(ZaloReactionListener.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly botRepo: BotRepository,
+    private readonly zaloRepo: ZaloRepository,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -36,51 +38,27 @@ export class ZaloReactionListener {
       const rIcon = event?.data?.content?.rIcon;
       const dName = event?.data?.dName || 'User';
 
-      // Resolve bot
-      const bot = await this.prisma.bot.findUnique({
-        where: { id: botId },
-        select: { customerId: true },
-      });
+      const bot = await this.botRepo.findById(botId);
       if (!bot) return;
 
-      // Find conversation
-      const conversation = await this.prisma.conversation.findFirst({
-        where: { botId, threadExternalId: String(threadId) },
-        select: { id: true },
-      });
-      if (!conversation) return;
+      const conversationId = await this.zaloRepo.findConversationIdByBotAndThread(botId, String(threadId));
+      if (!conversationId) return;
 
-      // Find message
       let message = null;
       if (gMsgID && gMsgID !== '0') {
-        message = await this.prisma.message.findUnique({
-          where: {
-            conversationId_messageExternalId: {
-              conversationId: conversation.id,
-              messageExternalId: gMsgID,
-            },
-          },
-        });
+        message = await this.zaloRepo.findMessageByCompositeKey(conversationId, gMsgID);
       }
 
       if (!message && cMsgID) {
-        // Fallback: search by timestamp close to cMsgID
         const cMsgTime = new Date(Number(cMsgID));
         const startTime = new Date(cMsgTime.getTime() - 2000);
         const endTime = new Date(cMsgTime.getTime() + 2000);
 
-        message = await this.prisma.message.findFirst({
-          where: {
-            conversationId: conversation.id,
-            createdAt: { gte: startTime, lte: endTime },
-          },
-          orderBy: { createdAt: 'asc' },
-        });
+        message = await this.zaloRepo.findMessageByTimeRange(conversationId, startTime, endTime);
       }
 
       if (!message) return;
 
-      // Parse existing reactions
       let reactionsList: Array<{
         userId: string;
         userName: string;
@@ -97,10 +75,8 @@ export class ZaloReactionListener {
         reactionsList = message.reactions as any;
       }
 
-      // Remove this user's existing reaction
       reactionsList = reactionsList.filter((r) => r.userId !== String(uidFrom));
 
-      // Add new reaction if present
       if (rIcon && rIcon !== '') {
         const emoji = EMOJI_MAP[rIcon] || rIcon;
         reactionsList.push({
@@ -110,16 +86,11 @@ export class ZaloReactionListener {
         });
       }
 
-      // Update DB
-      await this.prisma.message.update({
-        where: { id: message.id },
-        data: { reactions: reactionsList as any },
-      });
+      await this.zaloRepo.updateMessageReactions(message.id, reactionsList);
 
-      // Emit domain event
       this.eventEmitter.emit(DOMAIN_EVENTS.MessageReacted, {
         customerId: bot.customerId,
-        conversationId: conversation.id,
+        conversationId,
         messageExternalId: message.messageExternalId,
         reactions: reactionsList,
       });

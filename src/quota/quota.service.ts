@@ -1,6 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { BotRepository } from '@/bot/repositories/bot.repository';
-import { PrismaService } from '@/shared/prisma/prisma.service';
 import { QuotaExceededError } from '@/shared/errors/quota.errors';
 
 /**
@@ -20,7 +19,6 @@ import { QuotaExceededError } from '@/shared/errors/quota.errors';
 export class QuotaService {
   constructor(
     private readonly bots: BotRepository,
-    private readonly prisma: PrismaService,
   ) {}
 
   async consumeRequest(botId: number): Promise<void> {
@@ -53,10 +51,7 @@ export class QuotaService {
     if (!bot) throw new NotFoundException(`Bot ${botId} not found`);
 
     // Filter out IDs already attached — those are no-op updates, not consumption.
-    const existing = await this.prisma.document.findMany({
-      where: { botId, id: { in: newDocIds } },
-      select: { id: true },
-    });
+    const existing = await this.bots.findDocumentsByIds(botId, newDocIds);
     const existingSet = new Set(existing.map((e) => e.id));
     const trulyNew = newDocIds.filter((id) => !existingSet.has(id));
     if (trulyNew.length === 0) return;
@@ -73,7 +68,10 @@ export class QuotaService {
     }
   }
 
-  async summary(botId: number) {
+  async summary(botId: number): Promise<{
+    request: { used: number; limit: number; remaining: number };
+    document: { used: number; limit: number; remaining: number };
+  }> {
     const bot = await this.bots.findById(botId);
     if (!bot) throw new NotFoundException(`Bot ${botId} not found`);
     const docCount = await this.bots.listDocuments(botId).then((docs) => docs.length);

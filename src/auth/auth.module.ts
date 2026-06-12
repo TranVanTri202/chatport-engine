@@ -5,6 +5,7 @@ import { AppConfig } from '@/shared/config/app.config';
 import { PrismaModule } from '@/shared/prisma/prisma.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { AuthRepository } from './repositories/auth.repository';
 import { FirebaseAuthService } from './firebase-auth.service';
 import { JwtStrategy } from './jwt.strategy';
 import { JwtAuthGuard } from './jwt-auth.guard';
@@ -22,7 +23,7 @@ import { JwtAuthGuard } from './jwt-auth.guard';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, FirebaseAuthService, JwtStrategy, JwtAuthGuard],
+  providers: [AuthService, AuthRepository, FirebaseAuthService, JwtStrategy, JwtAuthGuard],
   exports: [JwtAuthGuard, JwtModule, PassportModule],
 })
 export class AuthModule {}

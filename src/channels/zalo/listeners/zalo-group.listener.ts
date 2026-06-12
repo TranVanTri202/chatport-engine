@@ -1,10 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { ThreadType } from '@prisma/client';
-import { PrismaService } from '@/shared/prisma/prisma.service';
+import { ChannelType, ThreadType } from '@/shared/types';
 import { DOMAIN_EVENTS } from '@/shared/events/domain-events';
 import { MessagingPublisher } from '@/messaging/messaging.publisher';
 import { ZaloZcaService } from '../zalo-zca.service';
+import { BotRepository } from '@/bot/repositories/bot.repository';
+import { ConversationRepository } from '@/conversations/repositories/conversation.repository';
 
 /**
  * Handles Zalo group_event: join, leave, remove_member, block_member,
@@ -16,7 +17,8 @@ export class ZaloGroupListener {
   private readonly logger = new Logger(ZaloGroupListener.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly botRepo: BotRepository,
+    private readonly convoRepo: ConversationRepository,
     private readonly zca: ZaloZcaService,
     private readonly publisher: MessagingPublisher,
     private readonly eventEmitter: EventEmitter2,
@@ -33,32 +35,15 @@ export class ZaloGroupListener {
       const type = event?.type;
       const updateMembers = event?.data?.updateMembers || [];
 
-      // Resolve bot
-      const bot = await this.prisma.bot.findUnique({
-        where: { id: botId },
-        select: { customerId: true },
-      });
+      const bot = await this.botRepo.findById(botId);
       if (!bot) return;
 
       // Find or create conversation
-      let conversation = await this.prisma.conversation.findUnique({
-        where: { botId_threadExternalId: { botId, threadExternalId: String(threadId) } },
+      const conversation = await this.convoRepo.getOrCreate({
+        botId,
+        threadType: ThreadType.group,
+        threadExternalId: String(threadId),
       });
-
-      if (!conversation) {
-        const groupInfo = await this.zca.getGroupInfo(botExternalId, String(threadId));
-        conversation = await this.prisma.conversation.create({
-          data: {
-            botId,
-            threadType: ThreadType.group,
-            threadExternalId: String(threadId),
-            title: groupInfo?.name || 'Zalo Group',
-            avatar: groupInfo?.avt || null,
-            unread: 0,
-            metadata: groupInfo ? { memberCount: groupInfo.totalMember } : {},
-          },
-        });
-      }
 
       switch (type) {
         case 'join':
@@ -83,7 +68,6 @@ export class ZaloGroupListener {
           await this.syncGroupInfo(botExternalId, conversation.id, threadId);
       }
 
-      // Emit conversation updated for all group events
       this.eventEmitter.emit(DOMAIN_EVENTS.ConversationUpdated, {
         customerId: bot.customerId,
         conversationId: conversation.id,
@@ -103,24 +87,12 @@ export class ZaloGroupListener {
     members: any[],
   ): Promise<void> {
     for (const member of members) {
-      await this.prisma.participant.upsert({
-        where: {
-          conversationId_externalId: {
-            conversationId,
-            externalId: String(member.id),
-          },
-        },
-        create: {
-          conversationId,
-          externalId: String(member.id),
-          displayName: member.dName || 'Zalo Member',
-          avatar: member.avatar || null,
-          isBot: String(member.id) === botExternalId,
-        },
-        update: {
-          displayName: member.dName || undefined,
-          avatar: member.avatar || undefined,
-        },
+      await this.convoRepo.upsertParticipant({
+        conversationId,
+        externalId: String(member.id),
+        displayName: member.dName || 'Zalo Member',
+        avatar: member.avatar || null,
+        isBot: String(member.id) === botExternalId,
       });
     }
   }
@@ -135,9 +107,7 @@ export class ZaloGroupListener {
   ): Promise<void> {
     const memberIds = members.map((m: any) => String(m.id));
     if (memberIds.length > 0) {
-      await this.prisma.participant.deleteMany({
-        where: { conversationId, externalId: { in: memberIds } },
-      });
+      await this.convoRepo.deleteParticipantsByExternalIds(conversationId, memberIds);
     }
 
     const isBotRemoved = memberIds.includes(botExternalId);
@@ -145,12 +115,10 @@ export class ZaloGroupListener {
       this.logger.warn(
         `Bot ${botExternalId} was removed from/left group ${threadId} (event=${eventType})`,
       );
-      const metadata = await this.getMetadata(conversationId);
-      await this.prisma.conversation.update({
-        where: { id: conversationId },
-        data: {
-          metadata: { ...metadata, isBotParticipant: false, memberCount: 0 },
-        },
+      const metadata = await this.convoRepo.findMetadata(conversationId);
+      const meta = (metadata as Record<string, any>) || {};
+      await this.convoRepo.update(conversationId, {
+        metadata: { ...meta, isBotParticipant: false, memberCount: 0 },
       });
     } else {
       await this.syncGroupInfo(botExternalId, conversationId, threadId);
@@ -172,8 +140,9 @@ export class ZaloGroupListener {
       try { params = JSON.parse(params); } catch { params = {}; }
     }
 
-    const metadata = await this.getMetadata(conversationId);
-    let pinnedMessages = metadata.pinnedMessages || [];
+    const metadata = await this.convoRepo.findMetadata(conversationId);
+    const meta = (metadata as Record<string, any>) || {};
+    let pinnedMessages = meta.pinnedMessages || [];
 
     const pinEntry = {
       id: String(topic.id),
@@ -189,12 +158,8 @@ export class ZaloGroupListener {
     pinnedMessages = pinnedMessages.filter((t: any) => t.id !== pinEntry.id);
     pinnedMessages.push(pinEntry);
 
-    await this.prisma.conversation.update({
-      where: { id: conversationId },
-      data: { metadata: { ...metadata, pinnedMessages } },
-    });
+    await this.convoRepo.updateMetadata(conversationId, { ...meta, pinnedMessages });
 
-    // Notification message
     const creatorName = params?.senderName || 'Thành viên';
     const title = params?.title || '';
     const isBotCreator = String(topic.creatorId) === botExternalId;
@@ -203,10 +168,10 @@ export class ZaloGroupListener {
       : `${creatorName} đã ghim tin nhắn ${title}`;
 
     await this.publisher.publishInbound({
-      channel: 'zalo' as any,
+      channel: ChannelType.zalo,
       botExternalId,
       threadId,
-      threadType: 'group' as any,
+      threadType: ThreadType.group,
       senderExternalId: String(topic.creatorId || botExternalId),
       senderName: creatorName,
       messageExternalId: `pin_notif_${topic.id}_${topic.createTime || Date.now()}`,
@@ -215,13 +180,7 @@ export class ZaloGroupListener {
       text: notificationText,
       attachments: [],
       isSelf: isBotCreator,
-      raw: {
-        isSystemPin: true,
-        topicId: topic.id,
-        title,
-        creatorId: topic.creatorId,
-        creatorName,
-      },
+      raw: { isSystemPin: true, topicId: topic.id, title, creatorId: topic.creatorId, creatorName },
     });
   }
 
@@ -235,8 +194,9 @@ export class ZaloGroupListener {
   ): Promise<void> {
     if (!topic) return;
 
-    const metadata = await this.getMetadata(conversationId);
-    let pinnedMessages = metadata.pinnedMessages || [];
+    const metadata = await this.convoRepo.findMetadata(conversationId);
+    const meta = (metadata as Record<string, any>) || {};
+    let pinnedMessages = meta.pinnedMessages || [];
 
     const targetId = String(topic.id);
     const existingPin = pinnedMessages.find((t: any) => t.id === targetId);
@@ -244,32 +204,23 @@ export class ZaloGroupListener {
 
     pinnedMessages = pinnedMessages.filter((t: any) => t.id !== targetId);
 
-    await this.prisma.conversation.update({
-      where: { id: conversationId },
-      data: { metadata: { ...metadata, pinnedMessages } },
-    });
+    await this.convoRepo.updateMetadata(conversationId, { ...meta, pinnedMessages });
 
-    // Notification message
     let params = topic.params;
     if (typeof params === 'string') {
       try { params = JSON.parse(params); } catch { params = {}; }
     }
-    const creatorName =
-      params?.senderName || existingPin?.params?.senderName || 'Thành viên';
+    const creatorName = params?.senderName || existingPin?.params?.senderName || 'Thành viên';
     const isBotCreator = String(topic.creatorId) === botExternalId;
     const notificationText = isBotCreator
-      ? title
-        ? `Bạn đã bỏ ghim tin nhắn ${title}`
-        : `Bạn đã bỏ ghim tin nhắn`
-      : title
-        ? `${creatorName} đã bỏ ghim tin nhắn ${title}`
-        : `${creatorName} đã bỏ ghim tin nhắn`;
+      ? title ? `Bạn đã bỏ ghim tin nhắn ${title}` : `Bạn đã bỏ ghim tin nhắn`
+      : title ? `${creatorName} đã bỏ ghim tin nhắn ${title}` : `${creatorName} đã bỏ ghim tin nhắn`;
 
     await this.publisher.publishInbound({
-      channel: 'zalo' as any,
+      channel: ChannelType.zalo,
       botExternalId,
       threadId,
-      threadType: 'group' as any,
+      threadType: ThreadType.group,
       senderExternalId: String(topic.creatorId || botExternalId),
       senderName: creatorName,
       messageExternalId: `unpin_notif_${topic.id}_${Date.now()}`,
@@ -278,13 +229,7 @@ export class ZaloGroupListener {
       text: notificationText,
       attachments: [],
       isSelf: isBotCreator,
-      raw: {
-        isSystemPin: true,
-        isUnpin: true,
-        topicId: topic.id,
-        creatorId: topic.creatorId,
-        creatorName,
-      },
+      raw: { isSystemPin: true, isUnpin: true, topicId: topic.id, creatorId: topic.creatorId, creatorName },
     });
   }
 
@@ -294,14 +239,13 @@ export class ZaloGroupListener {
     topicsOrder: any[],
     customerId: number,
   ): Promise<void> {
-    const metadata = await this.getMetadata(conversationId);
-    const pinnedMessages = metadata.pinnedMessages || [];
+    const metadata = await this.convoRepo.findMetadata(conversationId);
+    const meta = (metadata as Record<string, any>) || {};
+    const pinnedMessages = meta.pinnedMessages || [];
 
     const ordered: any[] = [];
     for (const orderItem of topicsOrder) {
-      const found = pinnedMessages.find(
-        (t: any) => t.id === String(orderItem.topicId),
-      );
+      const found = pinnedMessages.find((t: any) => t.id === String(orderItem.topicId));
       if (found) ordered.push(found);
     }
     for (const t of pinnedMessages) {
@@ -310,10 +254,7 @@ export class ZaloGroupListener {
       }
     }
 
-    await this.prisma.conversation.update({
-      where: { id: conversationId },
-      data: { metadata: { ...metadata, pinnedMessages: ordered } },
-    });
+    await this.convoRepo.updateMetadata(conversationId, { ...meta, pinnedMessages: ordered });
   }
 
   /** Fetch group info from Zalo and sync title/avatar/memberCount */
@@ -325,24 +266,12 @@ export class ZaloGroupListener {
     const groupInfo = await this.zca.getGroupInfo(botExternalId, String(threadId));
     if (!groupInfo) return;
 
-    const metadata = await this.getMetadata(conversationId);
-    await this.prisma.conversation.update({
-      where: { id: conversationId },
-      data: {
-        title: groupInfo.name || undefined,
-        avatar: groupInfo.avt || undefined,
-        metadata: { ...metadata, memberCount: groupInfo.totalMember },
-      },
+    const metadata = await this.convoRepo.findMetadata(conversationId);
+    const meta = (metadata as Record<string, any>) || {};
+    await this.convoRepo.update(conversationId, {
+      title: groupInfo.name || undefined,
+      avatar: groupInfo.avt || undefined,
+      metadata: { ...meta, memberCount: groupInfo.totalMember },
     });
-  }
-
-  private async getMetadata(
-    conversationId: number,
-  ): Promise<Record<string, any>> {
-    const convo = await this.prisma.conversation.findUnique({
-      where: { id: conversationId },
-      select: { metadata: true },
-    });
-    return (convo?.metadata as Record<string, any>) || {};
   }
 }

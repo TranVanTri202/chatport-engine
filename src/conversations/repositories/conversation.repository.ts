@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Conversation, Participant, Bot, Prisma } from '@prisma/client';
+import { Conversation, Participant, Bot, Message, Prisma } from '@prisma/client';
 import { PrismaService } from '@/shared/prisma/prisma.service';
 import { ChannelType, ThreadType } from '@/shared/types';
 
@@ -233,5 +233,117 @@ export class ConversationRepository {
       where: { id },
       data: { autoReplyEnabled },
     });
+  }
+
+  // ── Generic CRUD helpers for service-layer orchestration ─────────
+
+  /** Find conversation with its Bot relation (used by group mgmt, mute, etc.). */
+  async findWithBot(id: number) {
+    return this.prisma.conversation.findUnique({
+      where: { id },
+      include: { bot: true },
+    });
+  }
+
+  /** Generic update for any conversation fields. */
+  async update(id: number, data: Prisma.ConversationUpdateInput): Promise<Conversation> {
+    return this.prisma.conversation.update({ where: { id }, data });
+  }
+
+  /** Hard-delete a conversation. */
+  async delete(id: number): Promise<void> {
+    await this.prisma.conversation.delete({ where: { id } });
+  }
+
+  /** List ALL participants (no pagination). */
+  async findAllParticipants(conversationId: number): Promise<Participant[]> {
+    return this.prisma.participant.findMany({ where: { conversationId } });
+  }
+
+  /** Bulk-delete participants by their external IDs. */
+  async deleteParticipantsByExternalIds(
+    conversationId: number,
+    externalIds: string[],
+  ): Promise<void> {
+    await this.prisma.participant.deleteMany({
+      where: { conversationId, externalId: { in: externalIds } },
+    });
+  }
+
+  /** Find the most recent message by direction (used for seen-event in markRead). */
+  async findLastMessageByDirection(
+    conversationId: number,
+    direction: 'in' | 'out',
+  ): Promise<Message | null> {
+    return this.prisma.message.findFirst({
+      where: { conversationId, direction },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /** Resolve the Bot that owns a conversation (for channel checks). */
+  async findBotByConversationId(conversationId: number): Promise<Bot | null> {
+    const c = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { bot: true },
+    });
+    return c?.bot ?? null;
+  }
+
+  /** Find a conversation by bot + threadExternalId (used cross-module by contacts). */
+  async findByBotAndThread(botId: number, threadExternalId: string) {
+    return this.prisma.conversation.findFirst({
+      where: { botId, threadExternalId },
+      select: { id: true },
+    });
+  }
+
+  /** Upsert a conversation by bot + threadExternalId (used cross-module by contacts). */
+  async upsertByBotAndThread(input: {
+    botId: number;
+    threadExternalId: string;
+    threadType: string;
+    title: string | null;
+    avatar: string | null;
+  }): Promise<Conversation> {
+    return this.prisma.conversation.upsert({
+      where: {
+        botId_threadExternalId: {
+          botId: input.botId,
+          threadExternalId: input.threadExternalId,
+        },
+      },
+      create: {
+        botId: input.botId,
+        threadType: input.threadType as any,
+        threadExternalId: input.threadExternalId,
+        title: input.title,
+        avatar: input.avatar,
+      },
+      update: {
+        title: input.title,
+        avatar: input.avatar,
+      },
+    });
+  }
+
+  // ── Batch operations for sync ─────────────────────────────────────
+
+  /** Batch-read conversations by bot + thread external IDs. */
+  async findManyByBotAndExternalIds(botId: number, externalIds: string[]) {
+    return this.prisma.conversation.findMany({
+      where: { botId, threadExternalId: { in: externalIds } },
+      select: { id: true, threadExternalId: true, metadata: true },
+    });
+  }
+
+  /** Raw create (used in sync batch). */
+  async create(data: Prisma.ConversationUncheckedCreateInput): Promise<Conversation> {
+    return this.prisma.conversation.create({ data });
+  }
+
+  /** Run multiple operations atomically. */
+  async transaction<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    return this.prisma.$transaction(fn);
   }
 }

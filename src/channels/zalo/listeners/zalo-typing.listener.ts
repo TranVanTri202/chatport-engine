@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { PrismaService } from '@/shared/prisma/prisma.service';
+import { ChannelType } from '@/shared/types';
+import { BotRepository } from '@/bot/repositories/bot.repository';
 import { ZaloZcaService } from '../zalo-zca.service';
 
 /**
@@ -12,7 +13,7 @@ export class ZaloTypingListener {
   private readonly logger = new Logger(ZaloTypingListener.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly botRepo: BotRepository,
     private readonly zca: ZaloZcaService,
   ) {}
 
@@ -28,15 +29,8 @@ export class ZaloTypingListener {
       `agent.typing received for bot=${payload.botExternalId} thread=${payload.threadId} typing=${payload.isTyping}`,
     );
     try {
-      const bot = await this.prisma.bot.findFirst({
-        where: {
-          externalId: payload.botExternalId,
-          customerId: payload.customerId,
-          channel: 'zalo',
-        },
-        select: { id: true },
-      });
-      if (!bot) return;
+      const bot = await this.botRepo.findByExternal(ChannelType.zalo, payload.botExternalId);
+      if (!bot || bot.customerId !== payload.customerId) return;
 
       const threadTypeNum = payload.threadType === 'group' ? 1 : 0;
       await this.zca.sendTypingEvent(

@@ -68,4 +68,16 @@ export class MessageRepository {
       skip: 1,
     });
   }
+
+  /** Look up a message by external ID with its conversation + bot (used by forward). */
+  async findByExternalWithConversation(messageExternalId: string) {
+    return this.prisma.message.findFirst({
+      where: { messageExternalId },
+      include: {
+        conversation: {
+          include: { bot: true },
+        },
+      },
+    });
+  }
 }

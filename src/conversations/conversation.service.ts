@@ -1,9 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { Bot, Conversation, Prisma } from '@prisma/client';
 import { ChannelType, ThreadType } from '@/shared/types';
-import { PrismaService } from '@/shared/prisma/prisma.service';
 import { InboundMessageDto } from '@/messaging/dto/inbound-message.dto';
-import { ZaloZcaService } from '@/channels/zalo/zalo-zca.service';
+import { ZaloZcaService, ZaloUserProfile, ZaloGroupInfo, ZaloMemberInfo } from '@/channels/zalo/zalo-zca.service';
 import { ConversationRepository } from './repositories/conversation.repository';
 
 const DEFAULT_LIST_LIMIT = 30;
@@ -29,7 +28,6 @@ export class ConversationService {
   constructor(
     private readonly repo: ConversationRepository,
     private readonly zaloZcaService: ZaloZcaService,
-    private readonly prisma: PrismaService,
   ) {}
 
   /** Resolve the Bot row addressed by (channel, botExternalId). */
@@ -45,7 +43,7 @@ export class ConversationService {
     channel: ChannelType,
     botExternalId: string,
     userId: string,
-  ) {
+  ): Promise<ZaloUserProfile | null> {
     if (channel !== 'zalo') return null;
 
     // Ưu tiên #1: Contact.name (biệt danh người dùng đặt)
@@ -82,9 +80,9 @@ export class ConversationService {
     // User chat: sender profile + other user profile.
     // Group chat: sender profile + group info from Zalo.
     // Non-Zalo channels: resolveUserProfile returns null immediately (no-op).
-    let senderProfile: any = null;
-    let otherProfile: any = null;
-    let groupInfo: any = null;
+    let senderProfile: ZaloUserProfile | null = null;
+    let otherProfile: ZaloUserProfile | null = null;
+    let groupInfo: ZaloGroupInfo | null = null;
 
     if (msg.threadType === 'user') {
       [senderProfile, otherProfile] = await Promise.all([
@@ -222,9 +220,7 @@ export class ConversationService {
     if (!c) throw new NotFoundException(`Conversation ${id} not found`);
 
     // Sync pinned messages if Zalo
-    const bot = await this.prisma.bot.findUnique({
-      where: { id: c.botId },
-    });
+    const bot = await this.repo.findBotByConversationId(id);
 
     if (bot && bot.channel === 'zalo') {
       const metadata = (c.metadata as Record<string, any>) || {};
@@ -261,10 +257,7 @@ export class ConversationService {
     limit?: number;
     cursor?: number;
   }) {
-    const convo = await this.prisma.conversation.findUnique({
-      where: { id: input.conversationId },
-      include: { bot: true },
-    });
+    const convo = await this.repo.findWithBot(input.conversationId);
 
     if (convo && convo.bot.channel === 'zalo' && convo.threadType === 'group') {
       const metadata = (convo.metadata as Record<string, any>) || {};
@@ -289,13 +282,10 @@ export class ConversationService {
               lastSyncedAt: now,
             };
 
-            await this.prisma.conversation.update({
-              where: { id: convo.id },
-              data: {
-                title: groupInfo.name || convo.title,
-                avatar: groupInfo.avt || convo.avatar,
-                metadata: newMetadata,
-              },
+            await this.repo.update(convo.id, {
+              title: groupInfo.name || convo.title,
+              avatar: groupInfo.avt || convo.avatar,
+              metadata: newMetadata,
             });
 
             let currentMems = groupInfo.currentMems || [];
@@ -304,7 +294,7 @@ export class ConversationService {
                 const memberIds = groupInfo.memVerList.map((m: string) => m.split('_')[0]);
                 const memsRes = await this.zaloZcaService.getGroupMembersInfo(convo.bot.externalId, memberIds);
                 if (memsRes?.profiles) {
-                  currentMems = Object.values(memsRes.profiles).map((p: any) => ({
+                  currentMems = (Object.values(memsRes.profiles) as ZaloMemberInfo[]).map((p) => ({
                     id: p.id,
                     dName: p.displayName || p.zaloName || 'Zalo Member',
                     avatar: p.avatar,
@@ -315,50 +305,31 @@ export class ConversationService {
               }
             }
             
-            const dbParticipants = await this.prisma.participant.findMany({
-              where: { conversationId: convo.id },
-            });
+            const dbParticipants = await this.repo.findAllParticipants(convo.id);
 
-            const upsertPromises = currentMems.map((mem: any) => {
+            const upsertPromises = currentMems.map((mem: ZaloMemberInfo) => {
               const externalId = mem.id;
               const displayName = mem.dName || mem.zaloName || 'Zalo Member';
               const avatar = mem.avatar || null;
               const isBot = externalId === convo.bot.externalId;
 
-              return this.prisma.participant.upsert({
-                where: {
-                  conversationId_externalId: {
-                    conversationId: convo.id,
-                    externalId,
-                  },
-                },
-                create: {
-                  conversationId: convo.id,
-                  externalId,
-                  displayName,
-                  avatar,
-                  isBot,
-                },
-                update: {
-                  displayName,
-                  avatar,
-                },
+              return this.repo.upsertParticipant({
+                conversationId: convo.id,
+                externalId,
+                displayName,
+                avatar,
+                isBot,
               });
             });
             await Promise.all(upsertPromises);
 
-            const currentUids = new Set(currentMems.map((m: any) => m.id));
+            const currentUids = new Set(currentMems.map((m: ZaloMemberInfo) => m.id));
             const uidsToRemove = dbParticipants
               .map((p) => p.externalId)
               .filter((uid) => !currentUids.has(uid));
 
             if (uidsToRemove.length > 0) {
-              await this.prisma.participant.deleteMany({
-                where: {
-                  conversationId: convo.id,
-                  externalId: { in: uidsToRemove },
-                },
-              });
+              await this.repo.deleteParticipantsByExternalIds(convo.id, uidsToRemove);
             }
           }
         } catch (err) {
@@ -370,13 +341,10 @@ export class ConversationService {
     const take = input.limit ?? 1000;
     const rows = await this.repo.findManyParticipants(input.conversationId, take + 1, input.cursor);
     
-    const refreshedConvo = await this.prisma.conversation.findUnique({
-      where: { id: input.conversationId },
-      select: { metadata: true },
-    });
-    const metadata = (refreshedConvo?.metadata as Record<string, any>) || {};
-    const creatorId = metadata.creatorId || '';
-    const adminIds = metadata.adminIds || [];
+    const metadata = await this.repo.findMetadata(input.conversationId);
+    const meta = (metadata as Record<string, any>) || {};
+    const creatorId = meta.creatorId || '';
+    const adminIds = meta.adminIds || [];
 
     const hasMore = rows.length > take;
     const items = hasMore ? rows.slice(0, take) : rows;
@@ -429,18 +397,9 @@ export class ConversationService {
     await this.repo.updateUnread(id, 0);
 
     try {
-      const convo = await this.prisma.conversation.findUnique({
-        where: { id },
-        include: { bot: true },
-      });
+      const convo = await this.repo.findWithBot(id);
       if (convo && convo.bot.channel === 'zalo') {
-        const lastInboundMsg = await this.prisma.message.findFirst({
-          where: {
-            conversationId: id,
-            direction: 'in',
-          },
-          orderBy: { createdAt: 'desc' },
-        });
+        const lastInboundMsg = await this.repo.findLastMessageByDirection(id, 'in');
         if (lastInboundMsg && lastInboundMsg.raw) {
           const threadTypeNum = convo.threadType === 'group' ? 1 : 0;
           void this.zaloZcaService.sendSeenEvent(
@@ -460,11 +419,8 @@ export class ConversationService {
     await this.repo.updateAutoReply(id, autoReplyEnabled);
   }
 
-  private async getGroupConversationOrThrow(id: number) {
-    const convo = await this.prisma.conversation.findUnique({
-      where: { id },
-      include: { bot: true },
-    });
+  private async getGroupConversationOrThrow(id: number): Promise<NonNullable<Awaited<ReturnType<ConversationRepository['findWithBot']>>>> {
+    const convo = await this.repo.findWithBot(id);
     if (!convo) {
       throw new NotFoundException(`Conversation ${id} not found`);
     }
@@ -523,28 +479,20 @@ export class ConversationService {
       console.warn('Failed to fetch new group info immediately for avatar:', err);
     }
 
-    return this.prisma.conversation.upsert({
-      where: {
-        botId_threadExternalId: {
-          botId: bot.id,
-          threadExternalId: groupId,
-        },
-      },
-      update: {
-        title: name || 'Zalo Group',
-        avatar: finalAvatar || undefined,
-      },
-      create: {
-        botId: bot.id,
-        threadType: ThreadType.group,
-        threadExternalId: groupId,
-        title: name || 'Zalo Group',
-        avatar: finalAvatar,
-        unread: 0,
-        lastMessageAt: new Date(),
-        metadata: {
-          memberCount: members.length + 1,
-        },
+    // Use getOrCreate to ensure row exists, then update the full record
+    const existing = await this.repo.getOrCreate({
+      botId: bot.id,
+      threadType: ThreadType.group,
+      threadExternalId: groupId,
+    });
+
+    return this.repo.update(existing.id, {
+      title: name || 'Zalo Group',
+      avatar: finalAvatar || undefined,
+      unread: 0,
+      lastMessageAt: new Date(),
+      metadata: {
+        memberCount: members.length + 1,
       },
     });
   }
@@ -554,14 +502,11 @@ export class ConversationService {
     await this.zaloZcaService.leaveGroup(convo.bot.externalId, convo.threadExternalId);
     
     const metadata = (convo.metadata as Record<string, any>) || {};
-    await this.prisma.conversation.update({
-      where: { id },
-      data: {
-        metadata: {
-          ...metadata,
-          isBotParticipant: false,
-          memberCount: 0,
-        },
+    await this.repo.update(id, {
+      metadata: {
+        ...metadata,
+        isBotParticipant: false,
+        memberCount: 0,
       },
     });
   }
@@ -569,9 +514,7 @@ export class ConversationService {
   async disperseGroup(id: number): Promise<void> {
     const convo = await this.getGroupConversationOrThrow(id);
     await this.zaloZcaService.disperseGroup(convo.bot.externalId, convo.threadExternalId);
-    await this.prisma.conversation.delete({
-      where: { id },
-    });
+    await this.repo.delete(id);
   }
 
   async inviteMember(id: number, userId: string): Promise<void> {
@@ -582,13 +525,7 @@ export class ConversationService {
   async removeMember(id: number, userId: string): Promise<void> {
     const convo = await this.getGroupConversationOrThrow(id);
     await this.zaloZcaService.removeUserFromGroup(convo.bot.externalId, convo.threadExternalId, userId);
-    
-    await this.prisma.participant.deleteMany({
-      where: {
-        conversationId: id,
-        externalId: userId,
-      },
-    });
+    await this.repo.deleteParticipantsByExternalIds(id, [userId]);
   }
 
   async promoteDeputy(id: number, userId: string): Promise<void> {
@@ -600,13 +537,10 @@ export class ConversationService {
     if (!adminIds.includes(userId)) {
       adminIds.push(userId);
     }
-    await this.prisma.conversation.update({
-      where: { id },
-      data: {
-        metadata: {
-          ...metadata,
-          adminIds,
-        },
+    await this.repo.update(id, {
+      metadata: {
+        ...metadata,
+        adminIds,
       },
     });
   }
@@ -618,13 +552,10 @@ export class ConversationService {
     const metadata = (convo.metadata as Record<string, any>) || {};
     let adminIds = metadata.adminIds || [];
     adminIds = adminIds.filter((aid: string) => aid !== userId);
-    await this.prisma.conversation.update({
-      where: { id },
-      data: {
-        metadata: {
-          ...metadata,
-          adminIds,
-        },
+    await this.repo.update(id, {
+      metadata: {
+        ...metadata,
+        adminIds,
       },
     });
   }
@@ -634,32 +565,26 @@ export class ConversationService {
     await this.zaloZcaService.changeGroupOwner(convo.bot.externalId, convo.threadExternalId, userId);
     
     const metadata = (convo.metadata as Record<string, any>) || {};
-    await this.prisma.conversation.update({
-      where: { id },
-      data: {
-        metadata: {
-          ...metadata,
-          creatorId: userId,
-        },
+    await this.repo.update(id, {
+      metadata: {
+        ...metadata,
+        creatorId: userId,
       },
     });
   }
 
-  async updateGroupSettings(id: number, settings: any): Promise<void> {
+  async updateGroupSettings(id: number, settings: Record<string, unknown>): Promise<void> {
     const convo = await this.getGroupConversationOrThrow(id);
     await this.zaloZcaService.updateGroupSettings(convo.bot.externalId, convo.threadExternalId, settings);
     
     const metadata = (convo.metadata as Record<string, any>) || {};
     const currentSettings = metadata.settings || {};
-    await this.prisma.conversation.update({
-      where: { id },
-      data: {
-        metadata: {
-          ...metadata,
-          settings: {
-            ...currentSettings,
-            ...settings,
-          },
+    await this.repo.update(id, {
+      metadata: {
+        ...metadata,
+        settings: {
+          ...currentSettings,
+          ...settings,
         },
       },
     });
@@ -681,10 +606,7 @@ export class ConversationService {
   async changeGroupName(id: number, title: string): Promise<void> {
     const convo = await this.getGroupConversationOrThrow(id);
     await this.zaloZcaService.changeGroupName(convo.bot.externalId, convo.threadExternalId, title);
-    await this.prisma.conversation.update({
-      where: { id },
-      data: { title },
-    });
+    await this.repo.update(id, { title });
   }
 
   async changeGroupAvatar(id: number, avatar: string): Promise<void> {
@@ -694,10 +616,7 @@ export class ConversationService {
     try {
       const groupInfo = await this.zaloZcaService.getGroupInfo(convo.bot.externalId, convo.threadExternalId);
       if (groupInfo?.avt) {
-        await this.prisma.conversation.update({
-          where: { id },
-          data: { avatar: groupInfo.avt },
-        });
+        await this.repo.update(id, { avatar: groupInfo.avt });
       }
     } catch (err) {
       console.warn('Failed to fetch updated avatar immediately:', err);
@@ -705,10 +624,7 @@ export class ConversationService {
   }
 
   async updateMute(id: number, isMuted: boolean): Promise<void> {
-    const convo = await this.prisma.conversation.findUnique({
-      where: { id },
-      include: { bot: true },
-    });
+    const convo = await this.repo.findWithBot(id);
     if (!convo) {
       throw new NotFoundException(`Conversation ${id} not found`);
     }
@@ -728,13 +644,10 @@ export class ConversationService {
     }
 
     const metadata = (convo.metadata as Record<string, any>) || {};
-    await this.prisma.conversation.update({
-      where: { id },
-      data: {
-        metadata: {
-          ...metadata,
-          isMuted,
-        },
+    await this.repo.update(id, {
+      metadata: {
+        ...metadata,
+        isMuted,
       },
     });
   }

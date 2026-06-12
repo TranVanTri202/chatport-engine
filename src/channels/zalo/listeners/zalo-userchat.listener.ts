@@ -1,22 +1,22 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { PrismaService } from '@/shared/prisma/prisma.service';
+import { ChannelType, ThreadType } from '@/shared/types';
 import { DOMAIN_EVENTS } from '@/shared/events/domain-events';
 import { MessagingPublisher } from '@/messaging/messaging.publisher';
+import { BotRepository } from '@/bot/repositories/bot.repository';
+import { ConversationRepository } from '@/conversations/repositories/conversation.repository';
 
 /**
  * Handles pin/unpin events in 1-to-1 Zalo chats.
  * These arrive as friend_event type 10 (unpin) or type 11 (pin/unpin).
- *
- * Note: the original code had a duplicate unreachable type=10 block after
- * the type=10/11 combined block — removed here.
  */
 @Injectable()
 export class ZaloUserchatListener {
   private readonly logger = new Logger(ZaloUserchatListener.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly botRepo: BotRepository,
+    private readonly convoRepo: ConversationRepository,
     private readonly publisher: MessagingPublisher,
     private readonly eventEmitter: EventEmitter2,
   ) {}
@@ -31,17 +31,10 @@ export class ZaloUserchatListener {
     const threadId = event.threadId || event.data?.conversationId;
     if (!topic || !threadId) return;
 
-    const bot = await this.prisma.bot.findUnique({
-      where: { id: botId },
-    });
+    const bot = await this.botRepo.findById(botId);
     if (!bot) return;
 
-    const conversation = await this.prisma.conversation.findFirst({
-      where: {
-        botId,
-        threadExternalId: String(threadId),
-      },
-    });
+    const conversation = await this.convoRepo.findByBotAndThread(botId, String(threadId));
     if (!conversation) return;
 
     const type = event.type;
@@ -67,8 +60,9 @@ export class ZaloUserchatListener {
     event: any,
     customerId: number,
   ): Promise<void> {
-    const metadata = await this.getConversationMetadata(conversationId);
-    let pinnedMessages = metadata.pinnedMessages || [];
+    const metadata = await this.convoRepo.findMetadata(conversationId);
+    const meta = (metadata as Record<string, any>) || {};
+    let pinnedMessages = meta.pinnedMessages || [];
 
     let params = topic.params;
     if (typeof params === 'string') {
@@ -86,18 +80,11 @@ export class ZaloUserchatListener {
       },
     };
 
-    // Remove existing pin with same id, then push new one
     pinnedMessages = pinnedMessages.filter((t: any) => t.id !== pinEntry.id);
     pinnedMessages.push(pinEntry);
 
-    await this.prisma.conversation.update({
-      where: { id: conversationId },
-      data: {
-        metadata: { ...metadata, pinnedMessages },
-      },
-    });
+    await this.convoRepo.updateMetadata(conversationId, { ...meta, pinnedMessages });
 
-    // Emit notification message
     const isBotCreator = String(topic.creatorId) === botExternalId;
     const creatorName = params?.senderName || 'Thành viên';
     const titleStr = params?.title || '';
@@ -106,10 +93,10 @@ export class ZaloUserchatListener {
       : `${creatorName} đã ghim tin nhắn ${titleStr}`;
 
     await this.publisher.publishInbound({
-      channel: 'zalo' as any,
+      channel: ChannelType.zalo,
       botExternalId,
       threadId,
-      threadType: 'user' as any,
+      threadType: ThreadType.user,
       senderExternalId: String(topic.creatorId || botExternalId),
       senderName: creatorName,
       messageExternalId: `pin_notif_${pinEntry.id}_${topic.createTime || Date.now()}`,
@@ -136,8 +123,9 @@ export class ZaloUserchatListener {
     event: any,
     customerId: number,
   ): Promise<void> {
-    const metadata = await this.getConversationMetadata(conversationId);
-    let pinnedMessages = metadata.pinnedMessages || [];
+    const metadata = await this.convoRepo.findMetadata(conversationId);
+    const meta = (metadata as Record<string, any>) || {};
+    let pinnedMessages = meta.pinnedMessages || [];
 
     const targetId = String(topic.topicId || topic.id || '');
     const existingPin = pinnedMessages.find((t: any) => t.id === targetId);
@@ -145,14 +133,8 @@ export class ZaloUserchatListener {
 
     pinnedMessages = pinnedMessages.filter((t: any) => t.id !== targetId);
 
-    await this.prisma.conversation.update({
-      where: { id: conversationId },
-      data: {
-        metadata: { ...metadata, pinnedMessages },
-      },
-    });
+    await this.convoRepo.updateMetadata(conversationId, { ...meta, pinnedMessages });
 
-    // Emit notification message
     const isBotActor = event.data?.actorId
       ? String(event.data.actorId) === botExternalId
       : false;
@@ -167,10 +149,10 @@ export class ZaloUserchatListener {
         : `${actorName} đã bỏ ghim tin nhắn`;
 
     await this.publisher.publishInbound({
-      channel: 'zalo' as any,
+      channel: ChannelType.zalo,
       botExternalId,
       threadId,
-      threadType: 'user' as any,
+      threadType: ThreadType.user,
       senderExternalId: String(event.data?.actorId || botExternalId),
       senderName: actorName,
       messageExternalId: `unpin_notif_${targetId}_${Date.now()}`,
@@ -187,15 +169,5 @@ export class ZaloUserchatListener {
         creatorName: actorName,
       },
     });
-  }
-
-  private async getConversationMetadata(
-    conversationId: number,
-  ): Promise<Record<string, any>> {
-    const convo = await this.prisma.conversation.findUnique({
-      where: { id: conversationId },
-      select: { metadata: true },
-    });
-    return (convo?.metadata as Record<string, any>) || {};
   }
 }

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@/shared/prisma/prisma.service';
+import { BotSessionRepository } from '@/shared/prisma/bot-session.repository';
 
 export interface TelegramSessionPayload {
   botToken: string;
@@ -8,22 +8,18 @@ export interface TelegramSessionPayload {
 
 @Injectable()
 export class TelegramSessionService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly repo: BotSessionRepository) {}
 
   async load(botId: number): Promise<TelegramSessionPayload | null> {
-    const row = await this.prisma.botSession.findUnique({ where: { botId } });
-    return (row?.payload as TelegramSessionPayload | undefined) ?? null;
+    const payload = await this.repo.loadPayload(botId);
+    return (payload as TelegramSessionPayload | undefined) ?? null;
   }
 
   async save(botId: number, payload: TelegramSessionPayload): Promise<void> {
-    await this.prisma.botSession.upsert({
-      where: { botId },
-      create: { botId, payload: payload as unknown as object },
-      update: { payload: payload as unknown as object },
-    });
+    await this.repo.savePayload(botId, payload);
   }
 
   async clear(botId: number): Promise<void> {
-    await this.prisma.botSession.deleteMany({ where: { botId } });
+    await this.repo.clear(botId);
   }
 }

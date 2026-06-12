@@ -2,8 +2,8 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { BotStatus, ChannelType } from '@prisma/client';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { JwtService } from '@nestjs/jwt';
-import { PrismaService } from '@/shared/prisma/prisma.service';
 import { AppConfig } from '@/shared/config/app.config';
+import { AuthRepository } from './repositories/auth.repository';
 
 export type SocialProvider = 'google' | 'facebook';
 const DEMO_CUSTOMER_EMAIL = 'demo@askbase.local';
@@ -20,7 +20,7 @@ export interface SocialUserProfile {
 @Injectable()
 export class AuthService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: AuthRepository,
     private readonly jwt: JwtService,
     private readonly config: AppConfig,
   ) {}
@@ -30,30 +30,23 @@ export class AuthService {
     const expiresAt = new Date(
       Date.now() + this.config.jwtRefreshExpiresInDays * 24 * 60 * 60 * 1000,
     );
-    await this.prisma.refreshToken.create({
-      data: {
-        token,
-        customerId,
-        expiresAt,
-      },
+    await this.repo.createRefreshToken({
+      token,
+      customerId,
+      expiresAt,
     });
     return token;
   }
 
-  async loginWithFirebase(profile: SocialUserProfile) {
-    const customer = await this.prisma.customer.upsert({
-      where: { email: profile.email },
-      update: {
-        name: profile.name,
-        picture: profile.picture,
-        firebaseUid: profile.firebaseUid,
-      },
-      create: {
-        email: profile.email,
-        name: profile.name,
-        picture: profile.picture,
-        firebaseUid: profile.firebaseUid,
-      },
+  async loginWithFirebase(profile: SocialUserProfile): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    customer: { id: number; name: string; email: string; picture: string | null; firebaseUid: string | null; provider: string };
+  }> {
+    const customer = await this.repo.upsertCustomer(profile.email, {
+      name: profile.name,
+      picture: profile.picture,
+      firebaseUid: profile.firebaseUid,
     });
 
     const token = await this.jwt.signAsync({
@@ -80,17 +73,15 @@ export class AuthService {
     };
   }
 
-  async login(email: string) {
+  async login(email: string): Promise<{
+    accessToken: string;
+    access_token: string;
+    refreshToken: string;
+    customer: { id: number; name: string; email: string };
+  }> {
     const defaultName = email.split('@')[0] || 'User';
-    const customer = await this.prisma.customer.upsert({
-      where: { email },
-      update: {
-        name: defaultName,
-      },
-      create: {
-        email,
-        name: defaultName,
-      },
+    const customer = await this.repo.upsertCustomer(email, {
+      name: defaultName,
     });
 
     const accessToken = await this.jwt.signAsync({
@@ -109,15 +100,12 @@ export class AuthService {
     };
   }
 
-  async refresh(token: string) {
-    const record = await this.prisma.refreshToken.findUnique({
-      where: { token },
-      include: { customer: true },
-    });
+  async refresh(token: string): Promise<{ accessToken: string; refreshToken: string }> {
+    const record = await this.repo.findRefreshToken(token);
 
     if (!record || record.expiresAt < new Date()) {
       if (record) {
-        await this.prisma.refreshToken.delete({ where: { id: record.id } }).catch(() => undefined);
+        await this.repo.deleteRefreshToken(record.id).catch(() => undefined);
       }
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
@@ -129,9 +117,7 @@ export class AuthService {
     });
 
     const newRefreshToken = await this.generateRefreshToken(record.customerId);
-    await this.prisma.refreshToken.delete({
-      where: { id: record.id },
-    }).catch(() => undefined);
+    await this.repo.deleteRefreshToken(record.id).catch(() => undefined);
 
     return {
       accessToken,
@@ -140,8 +126,6 @@ export class AuthService {
   }
 
   async logout(token: string): Promise<void> {
-    await this.prisma.refreshToken.deleteMany({
-      where: { token },
-    });
+    await this.repo.deleteRefreshTokensByToken(token);
   }
 }

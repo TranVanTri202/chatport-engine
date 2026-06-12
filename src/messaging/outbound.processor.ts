@@ -7,7 +7,7 @@ import { ChannelRegistry } from '@/channels/channel-registry.service';
 import { ConversationService } from '@/conversations/conversation.service';
 import { MessageService } from '@/conversations/message.service';
 import { RealtimeGateway } from '@/realtime/realtime.gateway';
-import { PrismaService } from '@/shared/prisma/prisma.service';
+import { BotRepository } from '@/bot/repositories/bot.repository';
 import { RedisService } from '@/shared/redis/redis.service';
 import {
   ChannelExpiredError,
@@ -36,11 +36,11 @@ export class OutboundProcessor extends WorkerHost {
 
   constructor(
     private readonly registry: ChannelRegistry,
+    private readonly botRepo: BotRepository,
     private readonly redis: RedisService,
     private readonly conversations: ConversationService,
     private readonly messages: MessageService,
     private readonly realtime: RealtimeGateway,
-    private readonly prisma: PrismaService,
     private readonly events: EventEmitter2,
   ) {
     super();
@@ -56,9 +56,8 @@ export class OutboundProcessor extends WorkerHost {
 
     try {
       const adapter = this.registry.get(msg.channel);
-      let sendResult;
       try {
-        sendResult = await adapter.send(msg.botExternalId, {
+        await adapter.send(msg.botExternalId, {
           threadId: msg.threadId,
           threadType: msg.threadType,
           type: msg.type,
@@ -84,11 +83,7 @@ export class OutboundProcessor extends WorkerHost {
   }
 
   private async markExpired(botId: number): Promise<void> {
-    const updated = await this.prisma.bot.update({
-      where: { id: botId },
-      data: { status: BotStatus.expired },
-      select: { id: true, customerId: true, status: true },
-    });
+    const updated = await this.botRepo.update(botId, { status: BotStatus.expired as any });
     const evt: BotStatusChangedEvent = {
       botId: updated.id,
       customerId: updated.customerId,

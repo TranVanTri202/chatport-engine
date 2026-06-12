@@ -108,6 +108,13 @@ export class BotRepository {
     });
   }
 
+  findDocumentsByIds(botId: number, ids: number[]) {
+    return this.prisma.document.findMany({
+      where: { botId, id: { in: ids } },
+      select: { id: true },
+    });
+  }
+
   attachDocuments(botId: number, documentIds: number[]) {
     return this.prisma.document.updateMany({
       where: { id: { in: documentIds } },
@@ -153,5 +160,43 @@ export class BotRepository {
       where: { id: botId },
       data: { requestUsed: 0 },
     });
+  }
+
+  /** Upsert bot by channel + externalId (used by adapter during login). */
+  async upsertByExternal(input: {
+    channel: ChannelType;
+    externalId: string;
+    customerId: number;
+    name: string;
+    avatar: string | null;
+    status: string;
+  }): Promise<Bot> {
+    return this.prisma.bot.upsert({
+      where: {
+        channel_externalId: {
+          channel: input.channel,
+          externalId: input.externalId,
+        },
+      },
+      create: {
+        customerId: input.customerId,
+        channel: input.channel,
+        externalId: input.externalId,
+        name: input.name,
+        avatar: input.avatar,
+        status: input.status as any,
+      },
+      update: {
+        customerId: input.customerId,
+        name: input.name,
+        avatar: input.avatar,
+        status: input.status as any,
+      },
+    });
+  }
+
+  /** Run multiple operations atomically. */
+  async transaction<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    return this.prisma.$transaction(fn);
   }
 }

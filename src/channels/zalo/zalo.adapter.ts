@@ -17,8 +17,10 @@ import { ChannelRegistry } from '../channel-registry.service';
 import { ZaloInstanceRegistry } from './zalo-instance.registry';
 import { ZaloSessionService, ZaloSessionPayload } from './zalo-session.service';
 import { ZaloListeners } from './zalo.listeners';
-import { PrismaService } from '@/shared/prisma/prisma.service';
 import { ZaloZcaService } from './zalo-zca.service';
+import { BotRepository } from '@/bot/repositories/bot.repository';
+import { ContactsRepository } from '@/contacts/repositories/contacts.repository';
+import { ConversationRepository } from '@/conversations/repositories/conversation.repository';
 
 @Injectable()
 export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
@@ -32,8 +34,10 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
     private readonly sessions: ZaloSessionService,
     private readonly listeners: ZaloListeners,
     private readonly qrStorage: ZaloQrStorageService,
-    private readonly prisma: PrismaService,
     private readonly zca: ZaloZcaService,
+    private readonly botRepo: BotRepository,
+    private readonly contactRepo: ContactsRepository,
+    private readonly convoRepo: ConversationRepository,
   ) {}
 
   onModuleInit(): void {
@@ -102,27 +106,13 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
       }
 
       // 1. Create or update Bot in database
-      const bot = await this.prisma.bot.upsert({
-        where: {
-          channel_externalId: {
-            channel: ChannelType.zalo,
-            externalId: botExternalId,
-          },
-        },
-        create: {
-          customerId: input.customerId,
-          channel: ChannelType.zalo,
-          externalId: botExternalId,
-          name: botName,
-          avatar: botAvatar,
-          status: 'active',
-        },
-        update: {
-          customerId: input.customerId,
-          name: botName,
-          avatar: botAvatar,
-          status: 'active',
-        },
+      const bot = await this.botRepo.upsertByExternal({
+        channel: ChannelType.zalo,
+        externalId: botExternalId,
+        customerId: input.customerId,
+        name: botName,
+        avatar: botAvatar,
+        status: 'active',
       });
 
       // 2. Save session using the Bot's ID
@@ -177,10 +167,7 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
       } else {
         // Batch-read all existing contacts in ONE query (eliminates N findUnique)
         const friendIds = friends.map((f) => f.userId);
-        const existingContacts = await this.prisma.contact.findMany({
-          where: { botId, externalId: { in: friendIds } },
-          select: { externalId: true, name: true, zaloName: true },
-        });
+        const existingContacts = await this.contactRepo.findManyByExternalIds(botId, friendIds);
         const existingMap = new Map(
           existingContacts.map((c) => [c.externalId, c]),
         );
@@ -195,41 +182,22 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
             existing && existing.zaloName && existing.name !== existing.zaloName;
           const nameToSet = hasCustomAlias ? existing!.name : defaultName;
 
-          return this.prisma.contact.upsert({
-            where: {
-              botId_externalId: {
-                botId,
-                externalId: friend.userId,
-              },
-            },
-            create: {
-              botId,
-              externalId: friend.userId,
-              name: defaultName,
-              avatar: friend.avatar || null,
-              phone: friend.phoneNumber || null,
-              cover: friend.cover || null,
-              gender: friend.gender !== undefined ? friend.gender : null,
-              dob: friend.sdob || (friend.dob ? String(friend.dob) : null),
-              signature: friend.status || null,
-              zaloName: newZaloName,
-              isFriend: true,
-            },
-            update: {
-              name: nameToSet,
-              avatar: friend.avatar || null,
-              phone: friend.phoneNumber || null,
-              cover: friend.cover || null,
-              gender: friend.gender !== undefined ? friend.gender : null,
-              dob: friend.sdob || (friend.dob ? String(friend.dob) : null),
-              signature: friend.status || null,
-              zaloName: newZaloName,
-              isFriend: true,
-            },
+          return this.contactRepo.upsertContact({
+            botId,
+            externalId: friend.userId,
+            name: nameToSet,
+            avatar: friend.avatar || null,
+            phone: friend.phoneNumber || null,
+            cover: friend.cover || null,
+            gender: friend.gender !== undefined ? friend.gender : null,
+            dob: friend.sdob || (friend.dob ? String(friend.dob) : null),
+            signature: friend.status || null,
+            zaloName: newZaloName,
+            isFriend: true,
           });
         });
 
-        await this.prisma.$transaction(upserts);
+        await Promise.all(upserts);
       }
       this.logger.log(`Successfully synced friends list for botId=${botId}`);
 
@@ -238,17 +206,11 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
       const requests = await this.zca.getFriendRequests(botExternalId);
       this.logger.log(`Found ${requests.length} incoming requests for botId=${botId}`);
 
-      const existingDbRequests = await this.prisma.friendRequest.findMany({
-        where: { botId },
-      });
+      const existingDbRequests = await this.contactRepo.findAllRequestsByBot(botId);
       const activeExternalIds = new Set(requests.map((r) => r.userId));
       const toDelete = existingDbRequests.filter((r) => !activeExternalIds.has(r.externalId));
       if (toDelete.length > 0) {
-        await this.prisma.friendRequest.deleteMany({
-          where: {
-            id: { in: toDelete.map((r) => r.id) },
-          },
-        });
+        await this.contactRepo.deleteRequestsByIds(toDelete.map((r) => r.id));
       }
 
       if (requests.length === 0) {
@@ -256,25 +218,15 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
       } else {
         // Batch all friend request upserts in a single transaction
         const reqUpserts = requests.map((req) =>
-          this.prisma.friendRequest.upsert({
-            where: {
-              botId_externalId: { botId, externalId: req.userId },
-            },
-            create: {
-              botId,
-              externalId: req.userId,
-              name: req.displayName,
-              avatar: req.avatar,
-              source: req.message || 'Zalo Request',
-            },
-            update: {
-              name: req.displayName,
-              avatar: req.avatar,
-              source: req.message || 'Zalo Request',
-            },
+          this.contactRepo.upsertRequest({
+            botId,
+            externalId: req.userId,
+            name: req.displayName,
+            avatar: req.avatar,
+            source: req.message || 'Zalo Request',
           }),
         );
-        await this.prisma.$transaction(reqUpserts);
+        await Promise.all(reqUpserts);
       }
       this.logger.log(`Successfully synced friend requests for botId=${botId}`);
     } catch (error) {
@@ -311,16 +263,13 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
       }
 
       // Phase 2: batch-read existing conversations (1 query)
-      const existingConvos = await this.prisma.conversation.findMany({
-        where: { botId, threadExternalId: { in: groupIds } },
-        select: { id: true, threadExternalId: true, metadata: true },
-      });
+      const existingConvos = await this.convoRepo.findManyByBotAndExternalIds(botId, groupIds);
       const convoMap = new Map(
         existingConvos.map((c) => [c.threadExternalId, c]),
       );
 
       // Phase 3: build upsert operations + metadata merges in a single transaction
-      const operations: Array<any> = [];
+      const operations: Array<Promise<any>> = [];
       for (const { groupId, info } of groupInfos) {
         if (!info) continue;
 
@@ -333,34 +282,29 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
 
         if (existing) {
           operations.push(
-            this.prisma.conversation.update({
-              where: { id: existing.id },
-              data: {
-                title: info.name ?? undefined,
-                avatar: info.avt ?? undefined,
-                metadata: mergedMetadata,
-              },
+            this.convoRepo.update(existing.id, {
+              title: info.name ?? undefined,
+              avatar: info.avt ?? undefined,
+              metadata: mergedMetadata,
             }),
           );
         } else {
           operations.push(
-            this.prisma.conversation.create({
-              data: {
-                botId,
-                threadType: 'group',
-                threadExternalId: groupId,
-                title: info.name || 'Zalo Group',
-                avatar: info.avt || null,
-                lastMessageAt: new Date(0),
-                metadata: mergedMetadata,
-              },
+            this.convoRepo.create({
+              botId,
+              threadType: 'group',
+              threadExternalId: groupId,
+              title: info.name || 'Zalo Group',
+              avatar: info.avt || null,
+              lastMessageAt: new Date(0),
+              metadata: mergedMetadata,
             }),
           );
         }
       }
 
       if (operations.length > 0) {
-        await this.prisma.$transaction(operations);
+        await Promise.all(operations);
       }
       this.logger.log(`Successfully synced groups list for botId=${botId}`);
     } catch (error) {
@@ -391,7 +335,7 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
   }
 
   async getProfile(botId: number): Promise<any> {
-    const bot = await this.prisma.bot.findUnique({ where: { id: botId } });
+    const bot = await this.botRepo.findById(botId);
     if (!bot) throw new NotFoundException(`Bot ${botId} not found`);
     const botExternalId = bot.externalId;
 
@@ -425,7 +369,7 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
   }
 
   async updateProfile(botId: number, name?: string, bio?: string, avatarBase64?: string): Promise<any> {
-    const bot = await this.prisma.bot.findUnique({ where: { id: botId } });
+    const bot = await this.botRepo.findById(botId);
     if (!bot) throw new NotFoundException(`Bot ${botId} not found`);
     const botExternalId = bot.externalId;
 
@@ -473,10 +417,7 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
         },
       });
 
-      await this.prisma.bot.update({
-        where: { id: botId },
-        data: { name },
-      });
+      await this.botRepo.update(botId, { name });
     }
 
     if (avatarBase64 !== undefined && avatarBase64) {
@@ -492,17 +433,14 @@ export class ZaloAdapter implements IChannelAdapter, OnModuleInit {
         const info = await api.fetchAccountInfo();
         if (info?.profile?.avatar) {
           newAvatarUrl = info.profile.avatar;
-          await this.prisma.bot.update({
-            where: { id: botId },
-            data: { avatar: newAvatarUrl },
-          });
+          await this.botRepo.update(botId, { avatar: newAvatarUrl });
         }
       } catch (err) {
         this.logger.warn(`Failed to fetch updated avatar URL from Zalo: ${(err as Error).message}`);
       }
     }
 
-    return this.prisma.bot.findUnique({ where: { id: botId } });
+    return this.botRepo.findById(botId);
   }
 
   private parseAvatarAttachment(url: string) {

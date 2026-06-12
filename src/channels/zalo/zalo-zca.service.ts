@@ -1,13 +1,32 @@
 import { Injectable } from '@nestjs/common';
 import { ZaloInstanceRegistry } from './zalo-instance.registry';
 import { RedisService } from '@/shared/redis/redis.service';
-import { PrismaService } from '@/shared/prisma/prisma.service';
+import { ZaloRepository } from './repositories/zalo.repository';
 import { Buffer } from 'buffer';
 
 export type ZaloUserProfile = {
   displayName: string | null;
   avatar: string | null;
 };
+
+export interface ZaloGroupInfo {
+  name: string;
+  avt: string | null;
+  totalMember: number;
+  creatorId?: string;
+  adminIds?: string[];
+  setting?: Record<string, unknown>;
+  currentMems?: ZaloMemberInfo[];
+  memVerList?: string[];
+}
+
+export interface ZaloMemberInfo {
+  id: string;
+  dName?: string;
+  zaloName?: string;
+  displayName?: string;
+  avatar?: string;
+}
 
 /**
  * Thin wrapper around zca-js calls used by the Zalo channel.
@@ -27,7 +46,7 @@ export class ZaloZcaService {
   constructor(
     private readonly instances: ZaloInstanceRegistry,
     private readonly redis: RedisService,
-    private readonly prisma: PrismaService,
+    private readonly repo: ZaloRepository,
   ) {}
 
   private formatPresenceText(lastOnline: number | null): string {
@@ -54,19 +73,8 @@ export class ZaloZcaService {
     if (/^\d+$/.test(threadId) && threadId.length < 10) {
       const contactId = parseInt(threadId, 10);
       try {
-        const bot = await this.prisma.bot.findUnique({
-          where: { channel_externalId: { channel: 'zalo', externalId: botExternalId } },
-          select: { id: true },
-        });
-        if (bot) {
-          const contact = await this.prisma.contact.findFirst({
-            where: { botId: bot.id, id: contactId },
-            select: { externalId: true },
-          });
-          if (contact) {
-            return contact.externalId;
-          }
-        }
+        const contactExternalId = await this.repo.resolveContactExternalId(botExternalId, contactId);
+        if (contactExternalId) return contactExternalId;
       } catch (err) {
         console.warn(`[resolveThreadId] Error:`, err);
       }
@@ -247,7 +255,7 @@ export class ZaloZcaService {
     rawMessage: any,
   ): Promise<any> {
     const api = this.instances.get(botExternalId) as any;
-    if (!api || typeof api.sendSeenEvent !== 'function') return null;
+    if (!api || typeof (api as any).sendSeenEvent !== 'function') return null;
     try {
       const payload = rawMessage.data || rawMessage;
       const msgParams = {
@@ -719,24 +727,11 @@ export class ZaloZcaService {
     let cliMsgId = '0';
 
     try {
-      const bot = await this.prisma.bot.findUnique({
-        where: { channel_externalId: { channel: 'zalo', externalId: botExternalId } },
-        select: { id: true },
-      });
-      if (bot) {
-        const conversation = await this.prisma.conversation.findFirst({
-          where: { botId: bot.id, threadExternalId: threadId },
-          select: { id: true },
-        });
-        if (conversation) {
-          const message = await this.prisma.message.findUnique({
-            where: {
-              conversationId_messageExternalId: {
-                conversationId: conversation.id,
-                messageExternalId,
-              },
-            },
-          });
+      const botId = await this.repo.findBotIdByExternal(botExternalId);
+      if (botId) {
+        const conversationId = await this.repo.findConversationIdByBotAndThread(botId, threadId);
+        if (conversationId) {
+          const message = await this.repo.findMessageByCompositeKey(conversationId, messageExternalId);
           if (message) {
             if (message.direction === 'out') {
               // Outbound message: we need its original cliMsgId
@@ -803,24 +798,11 @@ export class ZaloZcaService {
     let cliMsgId = '0';
 
     try {
-      const bot = await this.prisma.bot.findUnique({
-        where: { channel_externalId: { channel: 'zalo', externalId: botExternalId } },
-        select: { id: true },
-      });
-      if (bot) {
-        const conversation = await this.prisma.conversation.findFirst({
-          where: { botId: bot.id, threadExternalId: threadId },
-          select: { id: true },
-        });
-        if (conversation) {
-          const message = await this.prisma.message.findUnique({
-            where: {
-              conversationId_messageExternalId: {
-                conversationId: conversation.id,
-                messageExternalId,
-              },
-            },
-          });
+      const botId = await this.repo.findBotIdByExternal(botExternalId);
+      if (botId) {
+        const conversationId = await this.repo.findConversationIdByBotAndThread(botId, threadId);
+        if (conversationId) {
+          const message = await this.repo.findMessageByCompositeKey(conversationId, messageExternalId);
           if (message) {
             msgId = messageExternalId;
             if (message.direction === 'out') {
@@ -946,33 +928,16 @@ export class ZaloZcaService {
       });
     }
 
-    const bot = await this.prisma.bot.findUnique({
-      where: { channel_externalId: { channel: 'zalo', externalId: botExternalId } },
-      select: { id: true },
-    });
-    if (!bot) throw new Error('Bot not found');
+    const botId = await this.repo.findBotIdByExternal(botExternalId);
+    if (!botId) throw new Error('Bot not found');
 
-    const conversation = await this.prisma.conversation.findFirst({
-      where: { botId: bot.id, threadExternalId: threadId },
-      select: { id: true },
-    });
-    if (!conversation) throw new Error('Conversation not found');
+    const conversationId = await this.repo.findConversationIdByBotAndThread(botId, threadId);
+    if (!conversationId) throw new Error('Conversation not found');
 
-    const message = await this.prisma.message.findUnique({
-      where: {
-        conversationId_messageExternalId: {
-          conversationId: conversation.id,
-          messageExternalId,
-        },
-      },
-    });
+    const message = await this.repo.findMessageByCompositeKey(conversationId, messageExternalId);
     if (!message) throw new Error('Message not found');
 
-    const participant = await this.prisma.participant.findFirst({
-      where: { conversationId: conversation.id, externalId: message.senderExternalId || undefined },
-      select: { displayName: true },
-    });
-    const senderName = participant?.displayName || 'Thành viên';
+    const senderName = await this.repo.findParticipantName(conversationId, message.senderExternalId || '') || 'Thành viên';
 
     let client_msg_id = '0';
     if (message.raw && typeof message.raw === 'object') {

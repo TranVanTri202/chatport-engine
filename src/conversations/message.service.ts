@@ -7,7 +7,7 @@ import {
 } from '@/channels/channel-adapter.interface';
 import { InboundMessageDto } from '@/messaging/dto/inbound-message.dto';
 import { MessageRepository } from './repositories/message.repository';
-import { PrismaService } from '@/shared/prisma/prisma.service';
+import { ConversationRepository } from './repositories/conversation.repository';
 import { ZaloZcaService } from '@/channels/zalo/zalo-zca.service';
 import { ZaloNormalizer } from '@/channels/zalo/zalo.normalizer';
 
@@ -17,7 +17,7 @@ const DEFAULT_HISTORY_LIMIT = 20;
 export class MessageService {
   constructor(
     private readonly repo: MessageRepository,
-    private readonly prisma: PrismaService,
+    private readonly convoRepo: ConversationRepository,
     private readonly zaloZcaService: ZaloZcaService,
     private readonly zaloNormalizer: ZaloNormalizer,
   ) {}
@@ -94,7 +94,7 @@ export class MessageService {
     conversationId: number;
     limit?: number;
     cursor?: string;
-  }) {
+  }): Promise<{ items: Message[]; nextCursor: string | null }> {
     const take = input.limit ?? DEFAULT_HISTORY_LIMIT;
     const cursorBigInt = input.cursor ? BigInt(input.cursor) : undefined;
     
@@ -104,10 +104,7 @@ export class MessageService {
 
     if (rows.length === 0 && cursorBigInt === undefined) {
       try {
-        const convo = await this.prisma.conversation.findUnique({
-          where: { id: input.conversationId },
-          include: { bot: true },
-        });
+        const convo = await this.convoRepo.findWithBot(input.conversationId);
 
         console.log(`[HistorySync] Checking convo ID=${input.conversationId}, threadType=${convo?.threadType}, channel=${convo?.bot.channel}`);
 
@@ -169,17 +166,8 @@ export class MessageService {
     messageExternalId: string;
     targetThreadId: string;
     targetThreadType: 'user' | 'group';
-  }) {
-    const msg = await this.prisma.message.findFirst({
-      where: {
-        messageExternalId: input.messageExternalId,
-      },
-      include: {
-        conversation: {
-          include: { bot: true }
-        }
-      }
-    });
+  }): Promise<{ success: boolean; result: unknown }> {
+    const msg = await this.repo.findByExternalWithConversation(input.messageExternalId);
 
     if (!msg) {
       throw new Error(`Message ${input.messageExternalId} not found`);

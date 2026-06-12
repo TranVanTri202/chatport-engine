@@ -1,9 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { PrismaService } from '@/shared/prisma/prisma.service';
+import { ChannelType, ThreadType } from '@/shared/types';
 import { DOMAIN_EVENTS } from '@/shared/events/domain-events';
 import { MessagingPublisher } from '@/messaging/messaging.publisher';
 import { ZaloZcaService } from '../zalo-zca.service';
+import { BotRepository } from '@/bot/repositories/bot.repository';
+import { ContactsRepository } from '@/contacts/repositories/contacts.repository';
+import { ConversationRepository } from '@/conversations/repositories/conversation.repository';
+import { MessageType } from '../../channel-adapter.interface';
 
 /**
  * Handles Zalo friend_event: add (0), remove (1), request (2),
@@ -16,7 +20,9 @@ export class ZaloFriendListener {
   private readonly logger = new Logger(ZaloFriendListener.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly botRepo: BotRepository,
+    private readonly contactRepo: ContactsRepository,
+    private readonly convoRepo: ConversationRepository,
     private readonly zca: ZaloZcaService,
     private readonly publisher: MessagingPublisher,
     private readonly eventEmitter: EventEmitter2,
@@ -27,9 +33,7 @@ export class ZaloFriendListener {
       `Received Zalo friend_event: type=${event.type} for botId=${botId}`,
     );
     try {
-      const bot = await this.prisma.bot.findUnique({
-        where: { id: botId },
-      });
+      const bot = await this.botRepo.findById(botId);
       if (!bot) return;
 
       const { type } = event;
@@ -55,7 +59,6 @@ export class ZaloFriendListener {
           await this.handleFriendUnblock(botId, botExternalId, event.data as string);
           break;
         default:
-          // type 10/11 handled by userchat listener; ignore unknown types
           break;
       }
 
@@ -79,36 +82,33 @@ export class ZaloFriendListener {
   ): Promise<void> {
     this.logger.log(`Friend added: ${friendUid}`);
     const profile = await this.zca.getUserProfile(botExternalId, friendUid);
-    await this.prisma.contact.upsert({
-      where: { botId_externalId: { botId, externalId: friendUid } },
-      create: {
-        botId,
-        externalId: friendUid,
-        name: profile?.displayName || 'Zalo Friend',
-        avatar: profile?.avatar || null,
-        isFriend: true,
-      },
-      update: {
-        avatar: profile?.avatar || undefined,
-        isFriend: true,
-      },
+    await this.contactRepo.upsertContact({
+      botId,
+      externalId: friendUid,
+      name: profile?.displayName || 'Zalo Friend',
+      avatar: profile?.avatar || null,
+      phone: null,
+      cover: null,
+      gender: null,
+      dob: null,
+      signature: null,
+      zaloName: null,
+      isFriend: true,
     });
 
-    const conversation = await this.prisma.conversation.findFirst({
-      where: { botId, threadExternalId: friendUid },
-    });
+    const conversation = await this.convoRepo.findByBotAndThread(botId, friendUid);
     if (conversation) {
       const profileName = profile?.displayName || 'Zalo Friend';
       await this.publisher.publishInbound({
-        channel: 'zalo' as any,
+        channel: ChannelType.zalo,
         botExternalId,
         threadId: friendUid,
-        threadType: 'user' as any,
+        threadType: ThreadType.user,
         senderExternalId: friendUid,
         senderName: profileName,
         messageExternalId: `friend_add_${friendUid}_${Date.now()}`,
         timestamp: Date.now(),
-        type: 'unknown' as any,
+        type: 'unknown' as MessageType,
         text: `Bạn và ${profileName} đã trở thành bạn bè.`,
         attachments: [],
         isSelf: false,
@@ -124,30 +124,23 @@ export class ZaloFriendListener {
     friendUid: string,
   ): Promise<void> {
     this.logger.log(`Friend removed: ${friendUid}`);
-    const contact = await this.prisma.contact.findFirst({
-      where: { botId, externalId: friendUid },
-    });
+    const contact = await this.contactRepo.findFirstByBotAndExternal(botId, friendUid);
     const friendName = contact?.name || 'Zalo Friend';
 
-    await this.prisma.contact.updateMany({
-      where: { botId, externalId: friendUid },
-      data: { isFriend: false },
-    });
+    await this.contactRepo.updateManyByBotAndExternal(botId, friendUid, { isFriend: false });
 
-    const conversation = await this.prisma.conversation.findFirst({
-      where: { botId, threadExternalId: friendUid },
-    });
+    const conversation = await this.convoRepo.findByBotAndThread(botId, friendUid);
     if (conversation) {
       await this.publisher.publishInbound({
-        channel: 'zalo' as any,
+        channel: ChannelType.zalo,
         botExternalId,
         threadId: friendUid,
-        threadType: 'user' as any,
+        threadType: ThreadType.user,
         senderExternalId: friendUid,
         senderName: friendName,
         messageExternalId: `friend_remove_${friendUid}_${Date.now()}`,
         timestamp: Date.now(),
-        type: 'unknown' as any,
+        type: 'unknown' as MessageType,
         text: `Bạn và ${friendName} đã hủy kết bạn.`,
         attachments: [],
         isSelf: false,
@@ -165,19 +158,12 @@ export class ZaloFriendListener {
     const senderUid = reqData.fromUid;
     this.logger.log(`Friend request received from: ${senderUid}`);
     const profile = await this.zca.getUserProfile(botExternalId, senderUid);
-    await this.prisma.friendRequest.upsert({
-      where: { botId_externalId: { botId, externalId: senderUid } },
-      create: {
-        botId,
-        externalId: senderUid,
-        name: profile?.displayName || 'Unknown User',
-        avatar: profile?.avatar || null,
-        source: 'Zalo Request',
-      },
-      update: {
-        name: profile?.displayName || undefined,
-        avatar: profile?.avatar || undefined,
-      },
+    await this.contactRepo.upsertRequest({
+      botId,
+      externalId: senderUid,
+      name: profile?.displayName || 'Unknown User',
+      avatar: profile?.avatar || null,
+      source: 'Zalo Request',
     });
   }
 
@@ -189,9 +175,12 @@ export class ZaloFriendListener {
   ): Promise<void> {
     const senderUid = reqData.fromUid;
     this.logger.log(`Friend request cancelled/declined for: ${senderUid}`);
-    await this.prisma.friendRequest.deleteMany({
-      where: { botId, externalId: senderUid },
-    });
+    // Find by externalId and delete
+    const existing = await this.contactRepo.findAllRequestsByBot(botId);
+    const match = existing.find((r) => r.externalId === senderUid);
+    if (match) {
+      await this.contactRepo.deleteRequestsByIds([match.id]);
+    }
   }
 
   /** Friend blocked */
@@ -201,25 +190,21 @@ export class ZaloFriendListener {
     friendUid: string,
   ): Promise<void> {
     this.logger.log(`Friend blocked: ${friendUid}`);
-    const contact = await this.prisma.contact.findFirst({
-      where: { botId, externalId: friendUid },
-    });
+    const contact = await this.contactRepo.findFirstByBotAndExternal(botId, friendUid);
     const friendName = contact?.name || 'Zalo Friend';
 
-    const conversation = await this.prisma.conversation.findFirst({
-      where: { botId, threadExternalId: friendUid },
-    });
+    const conversation = await this.convoRepo.findByBotAndThread(botId, friendUid);
     if (conversation) {
       await this.publisher.publishInbound({
-        channel: 'zalo' as any,
+        channel: ChannelType.zalo,
         botExternalId,
         threadId: friendUid,
-        threadType: 'user' as any,
+        threadType: ThreadType.user,
         senderExternalId: friendUid,
         senderName: friendName,
         messageExternalId: `friend_block_${friendUid}_${Date.now()}`,
         timestamp: Date.now(),
-        type: 'unknown' as any,
+        type: 'unknown' as MessageType,
         text: `Bạn đã chặn ${friendName}.`,
         attachments: [],
         isSelf: false,
@@ -235,25 +220,21 @@ export class ZaloFriendListener {
     friendUid: string,
   ): Promise<void> {
     this.logger.log(`Friend unblocked: ${friendUid}`);
-    const contact = await this.prisma.contact.findFirst({
-      where: { botId, externalId: friendUid },
-    });
+    const contact = await this.contactRepo.findFirstByBotAndExternal(botId, friendUid);
     const friendName = contact?.name || 'Zalo Friend';
 
-    const conversation = await this.prisma.conversation.findFirst({
-      where: { botId, threadExternalId: friendUid },
-    });
+    const conversation = await this.convoRepo.findByBotAndThread(botId, friendUid);
     if (conversation) {
       await this.publisher.publishInbound({
-        channel: 'zalo' as any,
+        channel: ChannelType.zalo,
         botExternalId,
         threadId: friendUid,
-        threadType: 'user' as any,
+        threadType: ThreadType.user,
         senderExternalId: friendUid,
         senderName: friendName,
         messageExternalId: `friend_unblock_${friendUid}_${Date.now()}`,
         timestamp: Date.now(),
-        type: 'unknown' as any,
+        type: 'unknown' as MessageType,
         text: `Bạn đã bỏ chặn ${friendName}.`,
         attachments: [],
         isSelf: false,

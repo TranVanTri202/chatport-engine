@@ -11,6 +11,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ChannelType } from '@/shared/types';
 import {
   ConversationListItem,
   ConversationService,
@@ -38,7 +39,7 @@ export class ConversationsController {
     @Query() query: ListConversationsQuery,
   ): Promise<{ items: ConversationListItem[]; nextCursor: number | null }> {
     return this.conversations.listForBot({
-      channel: channel as any,
+      channel: channel as ChannelType,
       externalId,
       limit: query.limit,
       cursor: query.cursor,
